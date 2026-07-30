@@ -87,26 +87,24 @@ static void toast(NSString *msg) {
 
 // ==================== 数据库 ====================
 static NSString* findDBPath(void) {
-    NSString *base = @"/var/mobile/Containers/Data/Application/";
+    // App 沙盒内不能用 /var/mobile/Containers 扫描，用自身 Documents 目录
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    if (!paths.count) { LOG(@"Documents dir not found"); return nil; }
+    NSString *dbDir = [paths[0] stringByAppendingPathComponent:@"db"];
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *dirs = [fm contentsOfDirectoryAtPath:base error:nil];
+    NSArray *files = [fm contentsOfDirectoryAtPath:dbDir error:nil];
     NSString *found = nil;
     unsigned long long maxSz = 0;
-    for (NSString *d in dirs) {
-        NSString *dbDir = [NSString stringWithFormat:@"%@%@/Documents/db/", base, d];
-        NSArray *files = [fm contentsOfDirectoryAtPath:dbDir error:nil];
-        if (!files) continue;
-        for (NSString *f in files) {
-            if (![f hasPrefix:@"u."] || ![f hasSuffix:@".sqlite"]) continue;
-            if ([f rangeOfString:@"wal"].location  != NSNotFound) continue;
-            if ([f rangeOfString:@"shm"].location  != NSNotFound) continue;
-            if ([f rangeOfString:@"backup"].location != NSNotFound) continue;
-            NSString *fp = [dbDir stringByAppendingString:f];
-            NSDictionary *attr = [fm attributesOfItemAtPath:fp error:nil];
-            if (attr && [attr fileSize] > maxSz) {
-                maxSz = [attr fileSize];
-                found = fp;
-            }
+    for (NSString *f in files) {
+        if (![f hasPrefix:@"u."] || ![f hasSuffix:@".sqlite"]) continue;
+        if ([f rangeOfString:@"wal"].location  != NSNotFound) continue;
+        if ([f rangeOfString:@"shm"].location  != NSNotFound) continue;
+        if ([f rangeOfString:@"backup"].location != NSNotFound) continue;
+        NSString *fp = [dbDir stringByAppendingPathComponent:f];
+        NSDictionary *attr = [fm attributesOfItemAtPath:fp error:nil];
+        if (attr && [attr fileSize] > maxSz) {
+            maxSz = [attr fileSize];
+            found = fp;
         }
     }
     LOG(@"DB: %@ (%llu bytes)", found ?: @"NOT FOUND", maxSz);
