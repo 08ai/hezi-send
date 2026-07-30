@@ -23,6 +23,12 @@ jobs:
           echo "Dylib size: $(wc -c < HeziSend.dylib) bytes"
           file HeziSend.dylib
 
+      - name: Sign dylib
+        run: |
+          brew install ldid
+          ldid -S HeziSend.dylib
+          echo "Signed OK"
+
       - name: Install dpkg
         run: brew install dpkg
 
