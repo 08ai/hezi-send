@@ -23,6 +23,9 @@ jobs:
           echo "Dylib size: $(wc -c < HeziSend.dylib) bytes"
           file HeziSend.dylib
 
+      - name: Install dpkg
+        run: brew install dpkg
+
       - name: Package DEB
         run: |
           DEB_DIR="deb_build"
@@ -40,7 +43,7 @@ jobs:
           chmod 644 "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries/HeziSend.dylib"
           chmod 644 "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries/HeziSend.plist"
 
-          dpkg-deb -b "$DEB_DIR" hezi-groupsend.deb
+          dpkg-deb -Zgzip -b "$DEB_DIR" hezi-groupsend.deb
           echo "DEB size: $(wc -c < hezi-groupsend.deb) bytes"
 
       - name: Upload DEB artifact
