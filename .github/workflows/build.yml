@@ -1,0 +1,51 @@
+name: Build HeziSend Dylib
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build dylib
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -arch arm64 -dynamiclib \
+              -framework Foundation -framework UIKit -framework CoreGraphics \
+              -fobjc-arc -lsqlite3 \
+              -miphoneos-version-min=14.0 -isysroot "$SDK" \
+              -o HeziSend.dylib HeziSend.m
+          echo "Dylib size: $(wc -c < HeziSend.dylib) bytes"
+          file HeziSend.dylib
+
+      - name: Package DEB
+        run: |
+          DEB_DIR="deb_build"
+          rm -rf "$DEB_DIR"
+          mkdir -p "${DEB_DIR}/DEBIAN"
+          mkdir -p "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries"
+
+          cp control "${DEB_DIR}/DEBIAN/"
+          cp HeziSend.dylib "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries/"
+          cp HeziSend.plist "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries/"
+
+          chmod 755 "${DEB_DIR}/DEBIAN"
+          chmod 644 "${DEB_DIR}/DEBIAN/control"
+          chmod 755 "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries"
+          chmod 644 "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries/HeziSend.dylib"
+          chmod 644 "${DEB_DIR}/Library/MobileSubstrate/DynamicLibraries/HeziSend.plist"
+
+          dpkg-deb -b "$DEB_DIR" hezi-groupsend.deb
+          echo "DEB size: $(wc -c < hezi-groupsend.deb) bytes"
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hezi-groupsend
+          path: hezi-groupsend.deb
+          retention-days: 90
