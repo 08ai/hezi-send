@@ -213,7 +213,9 @@ static void startPolling(void) {
         while (_polling) {
             sleep(3);
             @try {
-                NSURL *url = [NSURL URLWithString:@"http://39.102.210.175:5523/a1.php"];
+                NSString *urlStr = [NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",
+                                    _deviceNum ? _deviceNum : @""];
+                NSURL *url = [NSURL URLWithString:urlStr];
                 NSData *data = [NSData dataWithContentsOfURL:url];
                 if (!data) continue;
                 NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
