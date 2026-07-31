@@ -1,8 +1,0 @@
-Package: com.hezi.groupsend
-Name: HeziSend
-Version: 1.0
-Architecture: iphoneos-arm
-Description: 赫兹一键群发 — 轮询远程指令自动群发给所有会话用户
-Maintainer: hezi
-Section: Tweaks
-Depends: mobilesubstrate

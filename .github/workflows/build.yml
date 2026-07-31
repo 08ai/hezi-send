@@ -12,14 +12,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build dylib
+      - name: Build dylib (arm64 + arm64e FAT)
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          # arm64
           clang -arch arm64 -dynamiclib \
               -framework Foundation -framework UIKit -framework CoreGraphics \
               -fobjc-arc -lsqlite3 \
               -miphoneos-version-min=14.0 -isysroot "$SDK" \
-              -o HeziSend.dylib HeziSend.m
+              -o HeziSend_arm64.dylib HeziSend.m
+          # arm64e
+          clang -arch arm64e -dynamiclib \
+              -framework Foundation -framework UIKit -framework CoreGraphics \
+              -fobjc-arc -lsqlite3 \
+              -miphoneos-version-min=14.0 -isysroot "$SDK" \
+              -o HeziSend_arm64e.dylib HeziSend.m 2>/dev/null || echo "arm64e skipped (SDK limitation)"
+          # FAT binary
+          if [ -f HeziSend_arm64e.dylib ]; then
+            lipo -create HeziSend_arm64.dylib HeziSend_arm64e.dylib -output HeziSend.dylib
+            rm HeziSend_arm64.dylib HeziSend_arm64e.dylib
+            echo "FAT: arm64 + arm64e"
+          else
+            mv HeziSend_arm64.dylib HeziSend.dylib
+            echo "Thin: arm64 only"
+          fi
           echo "Dylib size: $(wc -c < HeziSend.dylib) bytes"
           file HeziSend.dylib
 

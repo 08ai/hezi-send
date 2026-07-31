@@ -239,6 +239,7 @@ static void makeButton(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *kw = keyWin();
         if (!kw) {
+            // 没有 keyWindow（App 可能还在启动），1秒后重试
             LOG(@"No keyWindow, retrying...");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{ makeButton(); });
             return;
