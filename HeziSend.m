@@ -44,6 +44,26 @@ static UIButton      *_btn        = nil;
 static UILabel       *_btnLabel   = nil;
 static NSInteger      _totalUsers = 0;
 static NSInteger      _sentCount  = 0;
+static NSString      *_deviceNum  = nil;  // shebeihao.txt 内容
+
+// ==================== 设备号 ====================
+static NSString* loadDeviceNum(void) {
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    if (!paths.count) return @"";
+    NSString *fp = [paths[0] stringByAppendingPathComponent:@"shebeihao.txt"];
+    NSString *s = [NSString stringWithContentsOfFile:fp encoding:NSUTF8StringEncoding error:nil];
+    if (!s) return @"";
+    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    LOG(@"DeviceNum: %@", s);
+    return s;
+}
+
+// ==================== 按钮文本拼接 ====================
+static NSString* labelText(NSString *status) {
+    // 格式: "5轮询\n中" / "5 3/50"
+    NSString *prefix = _deviceNum ? _deviceNum : @"";
+    return [NSString stringWithFormat:@"%@%@", prefix, status];
+}
 
 // ==================== KeyWindow ====================
 static UIWindow* keyWin(void) {
@@ -59,7 +79,7 @@ static UIWindow* keyWin(void) {
 
 // ==================== 按钮状态更新 ====================
 static void setBtnText(NSString *s) {
-    dispatch_async(dispatch_get_main_queue(), ^{ _btnLabel.text = s; });
+    dispatch_async(dispatch_get_main_queue(), ^{ _btnLabel.text = labelText(s); });
 }
 
 // ==================== Toast ====================
@@ -264,6 +284,7 @@ static void makeButton(void) {
 __attribute__((constructor))
 static void HZInit(void) {
     LOG(@"HeziSend dylib loaded");
+    _deviceNum = loadDeviceNum();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         makeButton();
         startPolling();
