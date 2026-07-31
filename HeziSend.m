@@ -257,7 +257,7 @@ static void makeButton(void) {
         _btn.layer.borderColor = [UIColor whiteColor].CGColor;
 
         _btnLabel = [[UILabel alloc] initWithFrame:CGRectMake(2, 8, bs-4, bs-16)];
-        _btnLabel.text = @"轮询\n中";
+        _btnLabel.text = labelText(@"轮询\n中");
         _btnLabel.numberOfLines = 2;
         _btnLabel.textAlignment = NSTextAlignmentCenter;
         _btnLabel.font = [UIFont boldSystemFontOfSize:12];
