@@ -65,6 +65,7 @@ static void doMatch(void) {
 
 static void sendHiIfMatched(void) {
     if(!_matching)return;
+    LOG(@"sendHi check");
     Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return;
     UIWindow *kw=keyWin(); if(!kw)return;
     id cur=kw.rootViewController, chatVC=nil;
