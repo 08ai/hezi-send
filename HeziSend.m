@@ -270,14 +270,49 @@ static void injectTap(CGFloat x, CGFloat y) {
 static void doMatch(void) {
     LOG(@"doMatch() called");
     @try {
-        CGFloat sw = [UIScreen mainScreen].bounds.size.width;
-        CGFloat sh = [UIScreen mainScreen].bounds.size.height;
-        // 匹配按钮通常在底部：从下往上试
-        injectTap(sw * 0.50, sh - 80);   // 底部往上 80px
-        usleep(200000);
-        injectTap(sw * 0.50, sh - 140);  // 底部往上 140px
+        Class mc = objc_getClass("HZRandomMatchViewController");
+        if (!mc) return;
+
+        // 创建实例并加载 view
+        id vc = ((id(*)(Class,SEL))objc_msgSend)([mc class], @selector(alloc));
+        vc = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(init));
+        if (!vc) { LOG(@"Match: init failed"); return; }
+
+        // 强制加载 view
+        ((void(*)(id,SEL))objc_msgSend)(vc, @selector(loadViewIfNeeded));
+        id view = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(view));
+        LOG(@"Match: VC view=%@", view ? @"loaded" : @"nil");
+
+        // 尝试 showVoiceMatchWithGoto: 或其他已知方法
+        SEL showVoice = NSSelectorFromString(@"showVoiceMatchWithGoto:");
+        if ([vc respondsToSelector:showVoice]) {
+            ((void(*)(id,SEL,id))objc_msgSend)(vc, showVoice, vc);
+            LOG(@"Match: showVoiceMatchWithGoto called");
+        }
+
+        SEL voiceCheck = NSSelectorFromString(@"voiceCheckWithGoto:");
+        if ([vc respondsToSelector:voiceCheck]) {
+            ((void(*)(id,SEL,id))objc_msgSend)(vc, voiceCheck, vc);
+            LOG(@"Match: voiceCheckWithGoto called");
+        }
+
+        // 获取 model 并调用 buttonActionWithModel
+        id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
+        LOG(@"Match: model=%@", model ? @"exists" : @"nil");
+        SEL btnSel = NSSelectorFromString(@"buttonActionWithModel:");
+        if (model && [vc respondsToSelector:btnSel]) {
+            ((void(*)(id,SEL,id))objc_msgSend)(vc, btnSel, model);
+            LOG(@"Match: buttonActionWithModel called");
+        }
+
+        // 也调 requestData
+        SEL reqSel = NSSelectorFromString(@"requestData");
+        if ([vc respondsToSelector:reqSel]) {
+            ((void(*)(id,SEL))objc_msgSend)(vc, reqSel);
+            LOG(@"Match: requestData called");
+        }
+
         _lastMatch = [[NSDate date] timeIntervalSince1970];
-        LOG(@"Match: taps at bottom (y=%.0f, %.0f)", sh-80, sh-140);
     } @catch (NSException *e) { LOG(@"Match crash: %@", e); }
 }
 
