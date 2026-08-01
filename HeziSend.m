@@ -31,31 +31,30 @@ static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text 
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
 static void doMatch(void) {
-    Class pic=objc_getClass("PhotonIMClient");
-    if(!pic)return;
-    id c=((id(*)(Class,SEL))objc_msgSend)(pic,sel_registerName("sharedClient"));
-    if(!c)return;
-    // dump 所有方法并盲调
-    unsigned int mc=0; Method *ms=class_copyMethodList(pic,&mc);
-    for(unsigned int i=0;i<mc;i++){
-        SEL s=method_getName(ms[i]);
-        NSString *nm=NSStringFromSelector(s);
-        // 跳过已知的方法和 getter/setter
-        if([nm hasPrefix:@"set"]||[nm hasPrefix:@"init"]||[nm hasPrefix:@"_"]||[nm hasPrefix:@"."]||[nm hasSuffix:@".cxx_destruct"])continue;
-        if([nm isEqualToString:@"sharedClient"]||[nm isEqualToString:@"sendMessage:completion:"]||[nm isEqualToString:@"sendQueue"]||[nm isEqualToString:@"setQueue:"])continue;
-        // 尝试调用所有返回 void 的无参方法
-        char rt[256]; method_getReturnType(ms[i],rt,256);
-        if(rt[0]=='v'){
-            unsigned int ac=method_getNumberOfArguments(ms[i]);
-            if(ac==2){ // self + _cmd = no args
-                @try{
-                    ((void(*)(id,SEL))objc_msgSend)(c,s);
-                    LOG(@"Photon try: %@",nm);
-                }@catch(NSException *e){}
-            }
-        }
+    // IOHIDEvent 触摸注入 - 快速点击匹配按钮
+    static void *(*IOHIDEventCreate)(void*,uint64_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,float,float,float,float,float,uint32_t,uint32_t,uint32_t)=NULL;
+    static void *(*IOServiceGetMatchingService)(void*,void*)=NULL;
+    static void*(*IOHIDEventSystemClientCreate)(void*)=NULL;
+    static void(*IOHIDEventSystemClientDispatchEvent)(void*,void*)=NULL;
+    static BOOL init=NO;
+    if(!init){init=YES;
+        void *io=dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",RTLD_NOW);
+        if(io){IOHIDEventCreate=dlsym(io,"IOHIDEventCreateDigitizerEvent");IOHIDEventSystemClientCreate=dlsym(io,"IOHIDEventSystemClientCreate");IOHIDEventSystemClientDispatchEvent=dlsym(io,"IOHIDEventSystemClientDispatchEvent");}
+        LOG(@"IOKit: create=%p client=%p dispatch=%p",IOHIDEventCreate,IOHIDEventSystemClientCreate,IOHIDEventSystemClientDispatchEvent);
     }
-    free(ms);
+    if(!IOHIDEventCreate||!IOHIDEventSystemClientDispatchEvent)return;
+    float sw=[UIScreen mainScreen].bounds.size.width,sh=[UIScreen mainScreen].bounds.size.height;
+    void *cl=IOHIDEventSystemClientCreate(NULL);
+    float xs=sw*0.5f, ys[]={sh-100,sh-150,sh-200,sh-60,sh*0.78f,sh*0.72f,sh*0.65f};
+    for(int i=0;i<7;i++){
+        uint64_t ts=mach_absolute_time();
+        void *d=IOHIDEventCreate(NULL,ts,0,0,0,0,0,0,0,xs,ys[i],0,0,0,1,0,0);
+        void *u=IOHIDEventCreate(NULL,ts+1000000,0,0,0,0,0,0,0,xs,ys[i],0,0,0,0,0,0);
+        if(d){IOHIDEventSystemClientDispatchEvent(cl,d);CFRelease(d);}
+        if(u){IOHIDEventSystemClientDispatchEvent(cl,u);CFRelease(u);}
+        usleep(50000);
+    }
+    LOG(@"Match: tapped 7 positions");
     _lastMatch=[[NSDate date] timeIntervalSince1970];
 }
 
