@@ -198,4 +198,19 @@ _matchSwitch=[[UISwitch alloc] initWithFrame:CGRectMake((pW-51)/2,20,51,31)]; _m
 static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0);class_addMethod(h,sel_registerName("onMatchToggle:"),(IMP)onMatchToggle,"v@:@");objc_registerClassPair(h);t=[[h alloc] init];} [_matchSwitch addTarget:t action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
 [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
-__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
+// Hook FlutterMethodChannel 记录所有 Flutter→Native 调用
+static IMP _origFMCI = NULL;
+static void fmcHook(id self, SEL _cmd, NSString *method, id args, id result) {
+    LOG(@"FMC: %@", method);
+    if(_origFMCI) ((void(*)(id,SEL,id,id,id))_origFMCI)(self,_cmd,method,args,result);
+}
+static void installFMCHook(void) {
+    Class fmc = objc_getClass("FlutterMethodChannel");
+    if(!fmc)return;
+    Method m = class_getInstanceMethod(fmc, sel_registerName("invokeMethod:arguments:result:"));
+    if(m){
+        _origFMCI = method_setImplementation(m, (IMP)fmcHook);
+        LOG(@"FMC hook installed");
+    }
+}
+__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); installFMCHook(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
