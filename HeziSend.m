@@ -348,7 +348,25 @@ static void installFlutterHooks(void) {
             LOG(@"HZHTTP hook OK");
         }
     }
-    // 4. Hook PhotonIMClient sendMessage:completion: (抓所有 Photon 消息)
+    // 4. Hook NSURLSession dataTaskWithRequest: (最底层 HTTP)
+    Class nsu = objc_getClass("NSURLSession");
+    if(nsu){
+        Method dtm = class_getInstanceMethod(nsu, sel_registerName("dataTaskWithRequest:completionHandler:"));
+        if(dtm){
+            IMP origDT = method_setImplementation(dtm, imp_implementationWithBlock(^(id self, id req, id handler){
+                NSURL *u = ((id(*)(id,SEL))objc_msgSend)(req, sel_registerName("URL"));
+                id hdrs = ((id(*)(id,SEL))objc_msgSend)(req, sel_registerName("allHTTPHeaderFields"));
+                id body = ((id(*)(id,SEL))objc_msgSend)(req, sel_registerName("HTTPBody"));
+                id mtd = ((id(*)(id,SEL))objc_msgSend)(req, sel_registerName("HTTPMethod"));
+                LOG(@"NSURL: %@ %@ headers=%@ body=%@", mtd, u, hdrs, body);
+                IMP old = class_getMethodImplementation(nsu, sel_registerName("_hz_nsurl_orig"));
+                if(old) ((void(*)(id,SEL,id,id))old)(self, sel_registerName("dataTaskWithRequest:completionHandler:"), req, handler);
+            }));
+            class_addMethod(nsu, sel_registerName("_hz_nsurl_orig"), origDT, method_getTypeEncoding(dtm));
+            LOG(@"NSURL hook OK");
+        }
+    }
+    // 5. Hook PhotonIMClient sendMessage:completion: (抓所有 Photon 消息)
     Class pic = objc_getClass("PhotonIMClient");
     if(pic){
         Method pm = class_getInstanceMethod(pic, sel_registerName("sendMessage:completion:"));
