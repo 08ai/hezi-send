@@ -48,8 +48,8 @@ static NSString      *_deviceNum  = nil;  // shebeihao.txt 内容
 
 // ==================== 设备号 ====================
 static NSString* loadDeviceNum(void) {
-    // 优先读沙箱外（恢复数据不会覆盖）：/var/mobile/Documents/shebeihao.txt
-    NSString *extPath = @"/var/mobile/Documents/shebeihao.txt";
+    // 优先读沙箱外（恢复数据不会覆盖）
+    NSString *extPath = @"/var/jb/shebeihao.txt";
     NSString *s = [NSString stringWithContentsOfFile:extPath encoding:NSUTF8StringEncoding error:nil];
     if (s) {
         s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
