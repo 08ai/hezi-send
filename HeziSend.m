@@ -365,6 +365,9 @@ static void makeButton(void) {
 }
 
 // ==================== 在线匹配 ====================
+// 前置声明
+static void sendHiIfMatched(void);
+
 // 递归找按钮（限制深度防崩溃）
 static UIButton* findMatchButtonDepth(UIView *view, int depth) {
     if (!view || depth > 15) return nil;
@@ -397,6 +400,10 @@ static void doMatch(void) {
             LOG(@"Match: tapping button");
             [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
             _lastMatch = [[NSDate date] timeIntervalSince1970];
+            // 延迟检查是否匹配成功并发送"嗨"
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                sendHiIfMatched();
+            });
             return;
         }
 
@@ -404,16 +411,14 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) return;
 
-        // 简单遍历 VC 链（不用递归 block）
+        // 简单遍历 VC 链
         id vc = kw.rootViewController;
         id matchVC = nil;
         for (int i = 0; i < 20 && vc && !matchVC; i++) {
             if ([vc isKindOfClass:matchCls]) { matchVC = vc; break; }
-            // 先看 presented
             SEL ps = sel_registerName("presentedViewController");
             id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
             if (pres) { vc = pres; continue; }
-            // 再看 childViewControllers
             SEL cs = sel_registerName("childViewControllers");
             if ([vc respondsToSelector:cs]) {
                 NSArray *children = ((id(*)(id,SEL))objc_msgSend)(vc, cs);
@@ -431,25 +436,61 @@ static void doMatch(void) {
             LOG(@"Match: tapping VC button");
             [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
             _lastMatch = [[NSDate date] timeIntervalSince1970];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                sendHiIfMatched();
+            });
             return;
         }
 
-        // 方式3：尝试调 startMatch
+        // 方式3：尝试调 startMatch / startLink
         SEL s = sel_registerName("startMatch");
         if ([matchVC respondsToSelector:s]) {
             ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
             _lastMatch = [[NSDate date] timeIntervalSince1970];
             LOG(@"Match: startMatch called");
-            return;
-        }
-        s = sel_registerName("startLink");
-        if ([matchVC respondsToSelector:s]) {
-            ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
-            _lastMatch = [[NSDate date] timeIntervalSince1970];
-            LOG(@"Match: startLink called");
+        } else {
+            s = sel_registerName("startLink");
+            if ([matchVC respondsToSelector:s]) {
+                ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
+                _lastMatch = [[NSDate date] timeIntervalSince1970];
+                LOG(@"Match: startLink called");
+            }
         }
     } @catch (NSException *e) {
         LOG(@"Match crash: %@", e);
+    }
+}
+
+// 匹配成功后给用户发"嗨"
+static void sendHiIfMatched(void) {
+    UIWindow *kw = keyWin();
+    if (!kw) return;
+    Class chatCls = objc_getClass("MDChatSingleViewController");
+    if (!chatCls) return;
+
+    // 找当前是否在聊天页
+    id vc = kw.rootViewController;
+    id chatVC = nil;
+    for (int i = 0; i < 20 && vc && !chatVC; i++) {
+        if ([vc isKindOfClass:chatCls]) { chatVC = vc; break; }
+        SEL ps = sel_registerName("presentedViewController");
+        id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
+        if (pres) { vc = pres; continue; }
+        SEL cs = sel_registerName("childViewControllers");
+        if ([vc respondsToSelector:cs]) {
+            NSArray *children = ((id(*)(id,SEL))objc_msgSend)(vc, cs);
+            if (children.count > 0) { vc = children.lastObject; continue; }
+        }
+        break;
+    }
+
+    if (chatVC) {
+        // 在聊天页，发送"嗨"
+        SEL sendSel = sel_registerName("sendMessageText:extInfo:");
+        if ([chatVC respondsToSelector:sendSel]) {
+            ((void(*)(id,SEL,id,id))objc_msgSend)(chatVC, sendSel, @"嗨", nil);
+            LOG(@"Match: sent 嗨");
+        }
     }
 }
 
