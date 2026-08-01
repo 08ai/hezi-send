@@ -72,13 +72,13 @@ static NSURLSessionDataTask* hookedDataTask(id self, SEL _cmd, NSURLRequest *req
 }
 
 static void installNSURLHook(void) {
+    // 1. Hook NSURLSession
     Class nsu = objc_getClass("NSURLSession");
-    if(!nsu) return;
-    Method m = class_getInstanceMethod(nsu, sel_registerName("dataTaskWithRequest:completionHandler:"));
-    if(!m) return;
-    _origDataTaskIMP = method_getImplementation(m);
-    method_setImplementation(m, (IMP)hookedDataTask);
-    LOG(@"NSURL hook OK");
+    if(nsu){
+        Method m = class_getInstanceMethod(nsu, sel_registerName("dataTaskWithRequest:completionHandler:"));
+        if(m){ _origDataTaskIMP = method_getImplementation(m); method_setImplementation(m, (IMP)hookedDataTask); LOG(@"NSURL hook OK"); }
+    }
+    // 2. 只保留 NSURLSession hook（已验证稳定），去掉 NSURLConnection hook（可能崩溃）
 }
 
 static void doMatch(void) {
@@ -88,7 +88,7 @@ static void doMatch(void) {
     // 读取之前缓存的 mzip
     NSString *cachePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"mzip_cache.txt"];
     NSString *mzip = [NSString stringWithContentsOfFile:cachePath encoding:NSUTF8StringEncoding error:nil];
-    if(!mzip) mzip = @"AgOz2piJANhHNJNV3WX5jOcWThXZIlRkxe23GDIiDiiueT8UKovtW5HwP2ZED8LG5ysKzctXTc6l6lUWICw2G/TUHFiZNu3545PRoZJgiMoY7L079EWKZf0J6JJ89p1icTrEH6mlTrBdnbUD+89pVtiiPaDqvcVPJnzz+ru4h70GgwJLazNKAbgeeVFpvm/qeNDftRK2uIC5zoeCzpMVTP2ed7uiCkew2B2EIh6RHsYGeCbx6h6PXs6gxOr1mF9mJhV45f8WjPcIyAx+CpjwUmjyIM/m7ZR8kH7KceKi6QObqfdnOlqV6p3diLxWek8hN7Ka+DaL5hz/ct6UlXrW00eCxcA54uKlWPfbL2jeYrI30usrYZd3QQp8aMGwENe168mLwhBz/yu5rOhFWVCPgANPuiH2CSRh/yBARBZhf7W853wM7S8dfDVWy2bhbjLT68EX3x4J/o2Iu8oGuS4YgPiZSq7lRcd9RGI4UXytyZjZ5HaIzLrlvbua6JeM1KEgc01hDUBzTXldSXTeWHZny9Vs7Vg06OHOEr1YTd20ekH0uunm8I4MbdsGfC1crEsQVcek/8vocnhqZTg/chplr4duadMxQw5s8XRWuUn9O97yi+PxCogDGHQh5Jie5xXN4TNbzH0r0+3HkwjhR+YUgmn7vBrm9P29JTWok3RGIj9oFWurmXrEsLbJA6AhqbUD5gWKpR6J69RqHgsFi46zMKXEj6N+df+iAs7wzWVWfnwTTc55gBBRZYOwLIAVM/zCM/8GeMwXsYjN1EvxyGFAYCuczriTVZLAzmixV90+98Q9vU2C6ba22+lCIOrCeP5KS8sz6HyMAQDUYABRH50t0ibPfoOqkM3OoBc70LsDQZ5fXlquN1xsg+6IZR61SiLO0mtuMJLAXf25YOUzwY2m2dKn9JVEXebaZKRO21NIm/BVG8gQRDi2/c2ja6oLNDTBnmeq7GAYhDqDjgNLQZBQw1cbXpGb0Av+z8dIoYdpNH1r9iOGab2phup31kfFd4AE09bKnEEs0musbJAB0zYEaI3W7GDlrZr6z7HfC1peDkpvBI31i/adqNFk2gl98QQNlNKgwbmfJLesHRGfSzwWLyCUMDtHQ8EgCyqFy4jmJqFGVVYx/AuDbu+nNgsRE5Vx7gWee9b2z2N6GRWU9KxugeWcyJgxbRQKvTaDc/Udc7q4h2k/IHju6rQQ4iQe3iqO0tcA3Edq9YTymh1O7Mf5+p8joUxSHcvksyWwkVE9Pyva8ayIQaPMvxguegXTQ6Z1HeceHu23XulfrhWaFp9yeGvAMuqYVhWu/u7PmNenZkP/G71JwHHZlnYvypLgMqbwBIPB1J9ixBLlcRxtYGmM9CzX8r0ivnzO3XuAfo/Npw4qg/uYRyoxHWua2pxhkhU9DxTvV0iIBPdTfsfp5mz0ok0z6yy0UqwqFsJdvLVc0w6MgZajoGsShNSYSvPvw6GDmz5nvdPlitEbKrMpVCgunrE3zHuFTevBx5X/fCHVhUGoq2WNH1+Mi1ihc9c3B5XqhJVIyaonhbKDTZNpmGycMYL1Kq6CsVmJBGG0ni9Jz8hnRw30HAtsgzCuBXxxTE5hygdE3W9lOIdf5GzL5uhN4en1JuIdpbDoBREn5D9z/PLJjkf/m1q7J2Fecu9GA8wRq7io0T9Nos8cPFAkhaXEg5PtQJDJ3e77U/w+Lh5RUm+YRlZ7Ln75FbThhz+3q/dMfqtS3uKzUXJcAvzq371JaYB5PIoekgP5zV5R5+VmEGrMpe0LXLT6otAUvCcBcwmvGUBmu3MBOsU50RUGJeWpDlCoDeX+hHBTbU581gNIWZuNxvi3IP6i0cYnrylKTGXsAEvqyo3YyoWVQV+6d+3/Rfeng2YX354=";
+    if(!mzip) mzip = @"";
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
     [req setHTTPMethod:@"POST"];
@@ -97,6 +97,9 @@ static void doMatch(void) {
     [req setValue:@"*/*" forHTTPHeaderField:@"accept"];
     [req setValue:@"zh-Hans-CN;q=1" forHTTPHeaderField:@"accept-language"];
     [req setValue:@"1" forHTTPHeaderField:@"x-lv"];
+    [req setValue:@"66e6ccf7" forHTTPHeaderField:@"x-kv"];
+    // 用 mzip 或最新抓到的
+    if(!mzip || mzip.length<100) mzip = @"AgO9yRIYAICUsMDoGPx6s3tC/ApIBBSzcH/K9tt148QnVfyG5FIWFcF7Xns+UA+uYlKfkq+Pu3Nr8Ym1agmlCnn41iBZkOMoggTA0uRPp6ptfLjkffhzRdJVNWJt7SlSU5gQa4YHT1RjOkiQINatfSFc3H/itwJ4pdk2ZbCwHwvjVb/dRR/eqQvYaaG4/cbS2zL7wJOAltdU0KL7+FYbItd62lGhoujPG1Jw3+y7ETjVgWLf02sUYITnjW6Li/J/yFuL8jC/gSojajFf2napeYEBka+cFYxiqGfVUNTHpLWNV3gEygdoFIZZel3gENUx5vc9lbjvLqLSUYP2m9RS7o5aoL44h0wOCLr/QLuIqUUa8vOAJX6E68tb42VJVTPxuA9ktRhvAl4hOS+lIcH2+/9RglxcVT+DCZal0i5mx/ljmVQr+Q75wQKKr6pcMKh0CLjXydqEV4BoeKPVbmBAIWT4m01Nhg0ZEB9/6eqSPccHu1H4bpzOH581ZwJwU8C/qETUDt1mK3R95n7H/RsS635odMIf/4rP7MFg2Xk/nMt00PZug0fLrbVKK1CTEe7tkIkkcKieYCo+uZSneh00aSz1CWkRhdgMbXHqJht8PU6C8w6M7zRt081kKwU4O9OuCSdV+gzIYuryYFiHDX6rlx8p4GiX4Rk5KJyXCF5z6cbmCLvCmMDofw0EzhPKxy8IRYibh/PliJ2hNK2RO7mZl6Lfw5eSEdDLvsmTOMdQMgKOZ5FciLzU+AfR/J5pTA5Dci4/ukRONfT3qIFZU4T5OclJ8wz5g3YrlH7i3ijJ6ENnMi8BIA++LTgcmhbkxP/pJMt4FoQ0J7VOGZRNHxyRJQYGoKE6jneJAv3x2uIgfTQxBo62lO7N6XeLxxtsjdFlnGRkUDK263Wj+wM8ZCwGLS5fZ9oowXF6AN3EoOu9pZE7UYE2dGgJCV1kV31esWCHOPhJ0ow+vGpqXsq7weSCg0C5fgWuf1Cu8XtsHmSIB/ByCelUjWzfaR5CJ223+be0LJhIHuEfOxui5iSi/w9J20xSvXjXf3GifsICfIxRg7ycZdJ8edewgXGfB8SK4A4D+bHhU8oVmG4QuZK0wDfkiVX2nhsX2dygrLkbhKt96YwIgd3DpPDwJ0DFjBBRTmHwMip4He8O6IrCT3/jMbrceqyqrkwEY/JbcIRj0FyZoahVnCD2A6FpuX+6pHRv8A/8GJh+KwZR8yNsfrKnGAiMWyE/bqeEoKZ51sr45JkHcy8MbAyUqyK6CWCPJLvk/+EBofwNN3MnuTjy6zYKUh7qiw5HfkL7q4nwJ/2e9hahoS2aiSP1zSIidcf+x3dbMF7yxVfNKWQJEwx0fhXvDMwkMGbaVamYO/CfXdn/WefgnWu8c2BKY8wN9ZPvES6HLHbCsOK7HSuogujtcXNBqpEM/c0+nP1sSq08EN1iwzri2LuPfZ7j1VRXsYoQ2Bd1w0eGo3AGTCXo7jPjgLnkQbw3ZVeHGGGcIFD3dkzrIub88GAzTroQ+0djw2HTFv8ypgvzgxEBu3uBYqwLv26KDrU8vvhHATw71C/77PXfV2EbipHrFZV9C3Vq5fvuZoU9dXyTg7qIaW2P97mPjfHko8PyqhCiCpGCmZQi0pKiS1ZVJtoqnpr3Dm1rKswha+7RF97w8ybGHBtIOzxJHGOCxDDh1i3LaMbmtTjUfiJRKUofxrZpuyqXRHx5cNYEdMVXymcxm/AO0a021PkXVTRR7qXqvM7zyxo7uRmWi42r12r+pwAbjiERaVM/Gq2jaoV+FHO1jOcWhlq20NdtpnXN9Ik3MA3iihNNocJkGaxcgQARY17MztOvUIpKhDMEZ3ut2kqTtWtCV1mLkwv+nqwZ5W8H3tGa6Cp0yfs=";
     [req setHTTPBody:[[NSString stringWithFormat:@"mzip=%@", mzip] dataUsingEncoding:NSUTF8StringEncoding]];
 
     dispatch_async(dispatch_get_global_queue(0,0), ^{
