@@ -34,40 +34,60 @@ static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^
 
 // ====== 匹配：用 HZRandomMatchViewController 触发 App 自己的匹配 ======
 static void doMatch(void) {
-    // 用 HZHTTPRequest + KVC 让 App 自己签名加密
     Class hzr = objc_getClass("HZHTTPRequest");
-    if(!hzr){ LOG(@"HZHTTPRequest missing"); return; }
+    if(!hzr) return;
     id req = ((id(*)(Class,SEL))objc_msgSend)([hzr class], @selector(alloc));
     req = ((id(*)(id,SEL))objc_msgSend)(req, @selector(init));
     if(!req) return;
 
-    // 尝试各种可能的 URL 设置方式
-    NSString *urlStr = @"https://vchat-api.mokatech.cn/like/find/match?fr=48051782";
-    SEL setUrlSel = NSSelectorFromString(@"setUrl:");
-    SEL setURLSel = NSSelectorFromString(@"setURL:");
-    SEL setPathSel = NSSelectorFromString(@"setPath:");
+    // 获取 _configuration ivar
+    Ivar configIvar = class_getInstanceVariable(hzr, "_configuration");
+    id config = nil;
+    if(configIvar) config = object_getIvar(req, configIvar);
+    LOG(@"Match: config=%@", config?:@"nil");
 
-    if([req respondsToSelector:setUrlSel]){ ((void(*)(id,SEL,id))objc_msgSend)(req, setUrlSel, urlStr); LOG(@"setUrl OK"); }
-    else if([req respondsToSelector:setURLSel]){ ((void(*)(id,SEL,id))objc_msgSend)(req, setURLSel, urlStr); LOG(@"setURL OK"); }
-    else if([req respondsToSelector:setPathSel]){ ((void(*)(id,SEL,id))objc_msgSend)(req, setPathSel, urlStr); LOG(@"setPath OK"); }
-    else {
-        // KVC fallback
-        @try { [req setValue:urlStr forKey:@"url"]; LOG(@"KVC url OK"); } @catch(NSException *e){}
-        @try { [req setValue:urlStr forKey:@"URL"]; LOG(@"KVC URL OK"); } @catch(NSException *e){}
-        @try { [req setValue:urlStr forKey:@"path"]; LOG(@"KVC path OK"); } @catch(NSException *e){}
-        @try { [req setValue:urlStr forKey:@"requestURL"]; LOG(@"KVC requestURL OK"); } @catch(NSException *e){}
+    // 在 config 上设 URL
+    NSString *urlStr = @"https://vchat-api.mokatech.cn/like/find/match?fr=48051782";
+    if(config){
+        @try {
+            [config setValue:urlStr forKey:@"url"];
+            LOG(@"Match: config.url set");
+        } @catch(NSException *e){ LOG(@"KVC url fail: %@", e); }
+        @try {
+            [config setValue:urlStr forKey:@"URL"];
+            LOG(@"Match: config.URL set");
+        } @catch(NSException *e){}
+        @try {
+            [config setValue:urlStr forKey:@"requestURL"];
+            LOG(@"Match: config.requestURL set");
+        } @catch(NSException *e){}
+        @try {
+            [config setValue:@"POST" forKey:@"httpMethod"];
+            LOG(@"Match: config.httpMethod set");
+        } @catch(NSException *e){}
+        @try {
+            [config setValue:@"POST" forKey:@"method"];
+            LOG(@"Match: config.method set");
+        } @catch(NSException *e){}
+        @try {
+            [config setValue:@{@"fr":@"48051782"} forKey:@"params"];
+            LOG(@"Match: config.params set");
+        } @catch(NSException *e){}
+        @try {
+            [config setValue:@{@"fr":@"48051782"} forKey:@"parameters"];
+            LOG(@"Match: config.parameters set");
+        } @catch(NSException *e){}
     }
 
-    // 设置 HTTP method
-    SEL setMtd = NSSelectorFromString(@"setHttpMethod:");
-    if([req respondsToSelector:setMtd]) ((void(*)(id,SEL,id))objc_msgSend)(req, setMtd, @"POST");
+    // dump config ivars
+    unsigned int cc=0; Ivar *ivs = class_copyIvarList([config class], &cc);
+    for(unsigned int i=0;i<cc;i++){
+        const char *n = ivar_getName(ivs[i]);
+        const char *t = ivar_getTypeEncoding(ivs[i]);
+        if(t && t[0]=='@'){ id v = object_getIvar(config, ivs[i]); LOG(@"  config.%s=%@", n, v?:@"nil"); }
+    }
+    free(ivs);
 
-    // 尝试设置参数
-    NSDictionary *params = @{@"fr":@"48051782"};
-    SEL setParams = NSSelectorFromString(@"setParams:");
-    if([req respondsToSelector:setParams]) ((void(*)(id,SEL,id))objc_msgSend)(req, setParams, params);
-
-    // 调用 start
     if([req respondsToSelector:@selector(start)]){
         ((void(*)(id,SEL))objc_msgSend)(req, @selector(start));
         LOG(@"Match: HZHTTP started");
