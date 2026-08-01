@@ -76,6 +76,27 @@ static id findMatchInObj(id obj) {
     return nil;
 }
 
+// dump 所有 accessibility 元素（调试用，找到后删除）
+static void dumpA11y(id container, int depth) {
+    if(!container||depth>15)return;
+    if([container isAccessibilityElement]){
+        NSString *l=[container accessibilityLabel];
+        if(l.length>0)LOG(@"A11Y[%d]: '%@'",depth,l);
+    }
+    if([container respondsToSelector:@selector(accessibilityElementCount)]){
+        NSInteger cnt=[container accessibilityElementCount];
+        for(NSInteger i=0;i<cnt;i++){
+            id child=[container accessibilityElementAtIndex:i];
+            dumpA11y(child,depth+1);
+        }
+    }
+    if([container isKindOfClass:[UIView class]]){
+        for(UIView *sub in [(UIView*)container subviews]){
+            dumpA11y(sub,depth+1);
+        }
+    }
+}
+
 // 递归找按钮并点击
 static BOOL tapAnyButton(UIView *view) {
     if(!view)return NO;
@@ -114,9 +135,14 @@ static void doMatch(void) {
             id m=((id(*)(id,SEL))objc_msgSend)(vc,@selector(model));
             SEL bs=NSSelectorFromString(@"buttonActionWithModel:");
             if([vc respondsToSelector:bs]){((void(*)(id,SEL,id))objc_msgSend)(vc,bs,m);LOG(@"Match: buttonActionWithModel");}
-            // 遍历找按钮点击
+            // 查找并点击匹配按钮
             id view=((id(*)(id,SEL))objc_msgSend)(vc,@selector(view));
-            if(!tapAnyButton(view))LOG(@"Match: no button found");
+            if(!tapAnyButton(view)){
+                LOG(@"Match: no native button, trying a11y...");
+                // dump 所有 a11y 标签（一次性）
+                static BOOL dumped=NO;
+                if(!dumped){dumped=YES;dumpA11y(view,0);}
+            }
         });
         _lastMatch=[[NSDate date] timeIntervalSince1970];
     }@catch(NSException *e){LOG(@"Match crash: %@",e);}
