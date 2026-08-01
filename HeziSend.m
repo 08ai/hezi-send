@@ -34,22 +34,44 @@ static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^
 
 // ====== 匹配：用 HZRandomMatchViewController 触发 App 自己的匹配 ======
 static void doMatch(void) {
-    Class mc = objc_getClass("HZRandomMatchViewController");
-    if(!mc) return;
-    id vc = ((id(*)(Class,SEL))objc_msgSend)([mc class], @selector(alloc));
-    vc = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(init));
-    if(!vc) return;
-    UIWindow *kw = keyWin(); if(!kw) return;
-    id cur = kw.rootViewController;
-    while(1){id p=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(p){cur=p;continue;} break;}
-    ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(cur, @selector(presentViewController:animated:completion:), vc, NO, nil);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
-        SEL bs = NSSelectorFromString(@"buttonActionWithModel:");
-        if([vc respondsToSelector:bs]){ ((void(*)(id,SEL,id))objc_msgSend)(vc, bs, model); LOG(@"Match: triggered"); }
-        SEL rs = NSSelectorFromString(@"requestData");
-        if([vc respondsToSelector:rs]){ ((void(*)(id,SEL))objc_msgSend)(vc, rs); LOG(@"Match: requestData"); }
-    });
+    // 用 HZHTTPRequest + KVC 让 App 自己签名加密
+    Class hzr = objc_getClass("HZHTTPRequest");
+    if(!hzr){ LOG(@"HZHTTPRequest missing"); return; }
+    id req = ((id(*)(Class,SEL))objc_msgSend)([hzr class], @selector(alloc));
+    req = ((id(*)(id,SEL))objc_msgSend)(req, @selector(init));
+    if(!req) return;
+
+    // 尝试各种可能的 URL 设置方式
+    NSString *urlStr = @"https://vchat-api.mokatech.cn/like/find/match?fr=48051782";
+    SEL setUrlSel = NSSelectorFromString(@"setUrl:");
+    SEL setURLSel = NSSelectorFromString(@"setURL:");
+    SEL setPathSel = NSSelectorFromString(@"setPath:");
+
+    if([req respondsToSelector:setUrlSel]){ ((void(*)(id,SEL,id))objc_msgSend)(req, setUrlSel, urlStr); LOG(@"setUrl OK"); }
+    else if([req respondsToSelector:setURLSel]){ ((void(*)(id,SEL,id))objc_msgSend)(req, setURLSel, urlStr); LOG(@"setURL OK"); }
+    else if([req respondsToSelector:setPathSel]){ ((void(*)(id,SEL,id))objc_msgSend)(req, setPathSel, urlStr); LOG(@"setPath OK"); }
+    else {
+        // KVC fallback
+        @try { [req setValue:urlStr forKey:@"url"]; LOG(@"KVC url OK"); } @catch(NSException *e){}
+        @try { [req setValue:urlStr forKey:@"URL"]; LOG(@"KVC URL OK"); } @catch(NSException *e){}
+        @try { [req setValue:urlStr forKey:@"path"]; LOG(@"KVC path OK"); } @catch(NSException *e){}
+        @try { [req setValue:urlStr forKey:@"requestURL"]; LOG(@"KVC requestURL OK"); } @catch(NSException *e){}
+    }
+
+    // 设置 HTTP method
+    SEL setMtd = NSSelectorFromString(@"setHttpMethod:");
+    if([req respondsToSelector:setMtd]) ((void(*)(id,SEL,id))objc_msgSend)(req, setMtd, @"POST");
+
+    // 尝试设置参数
+    NSDictionary *params = @{@"fr":@"48051782"};
+    SEL setParams = NSSelectorFromString(@"setParams:");
+    if([req respondsToSelector:setParams]) ((void(*)(id,SEL,id))objc_msgSend)(req, setParams, params);
+
+    // 调用 start
+    if([req respondsToSelector:@selector(start)]){
+        ((void(*)(id,SEL))objc_msgSend)(req, @selector(start));
+        LOG(@"Match: HZHTTP started");
+    }
     _lastMatch = [[NSDate date] timeIntervalSince1970];
 }
 
