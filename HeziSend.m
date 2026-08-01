@@ -30,6 +30,7 @@ static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text 
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
 static void doMatch(void) {
+    LOG(@"doMatch Photon try");
     Class pic=objc_getClass("PhotonIMClient"),pmsg=objc_getClass("PhotonIMMessage");
     if(!pic||!pmsg)return;
     id c=((id(*)(Class,SEL))objc_msgSend)(pic,sel_registerName("sharedClient"));
