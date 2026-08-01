@@ -49,6 +49,20 @@ static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text 
 
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ LOG(@"Polling started"); while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; LOG(@"Poll: %@",s); dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){LOG(@"Poll err: %@",e);} } }); }
 
+// ========== 监听：记录 HZRandomMatchViewController 的方法调用 ==========
+static void installMethodMonitor(void) {
+    Class mc = objc_getClass("HZRandomMatchViewController");
+    if (!mc) return;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(mc, &count);
+    LOG(@"Monitoring %u methods on HZRandomMatchViewController:", count);
+    for (unsigned int i = 0; i < count; i++) {
+        NSString *name = NSStringFromSelector(method_getName(methods[i]));
+        LOG(@"  [%u] %@", i, name);
+    }
+    free(methods);
+}
+
 // ========== MATCH ==========
 // 暴力遍历 ivars 找真正的 HZRandomMatchViewController
 static id findMatchInObj(id obj) {
