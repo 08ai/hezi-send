@@ -30,7 +30,34 @@ static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDCha
 static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
-static void doMatch(void) { _lastMatch=[[NSDate date] timeIntervalSince1970]; }
+static void doMatch(void) {
+    Class pic=objc_getClass("PhotonIMClient");
+    if(!pic)return;
+    id c=((id(*)(Class,SEL))objc_msgSend)(pic,sel_registerName("sharedClient"));
+    if(!c)return;
+    // dump 所有方法并盲调
+    unsigned int mc=0; Method *ms=class_copyMethodList(pic,&mc);
+    for(unsigned int i=0;i<mc;i++){
+        SEL s=method_getName(ms[i]);
+        NSString *nm=NSStringFromSelector(s);
+        // 跳过已知的方法和 getter/setter
+        if([nm hasPrefix:@"set"]||[nm hasPrefix:@"init"]||[nm hasPrefix:@"_"]||[nm hasPrefix:@"."]||[nm hasSuffix:@".cxx_destruct"])continue;
+        if([nm isEqualToString:@"sharedClient"]||[nm isEqualToString:@"sendMessage:completion:"]||[nm isEqualToString:@"sendQueue"]||[nm isEqualToString:@"setQueue:"])continue;
+        // 尝试调用所有返回 void 的无参方法
+        char rt[256]; method_getReturnType(ms[i],rt,256);
+        if(rt[0]=='v'){
+            unsigned int ac=method_getNumberOfArguments(ms[i]);
+            if(ac==2){ // self + _cmd = no args
+                @try{
+                    ((void(*)(id,SEL))objc_msgSend)(c,s);
+                    LOG(@"Photon try: %@",nm);
+                }@catch(NSException *e){}
+            }
+        }
+    }
+    free(ms);
+    _lastMatch=[[NSDate date] timeIntervalSince1970];
+}
 
 static void sendHiIfMatched(void) { if(!_matching)return; Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return; UIWindow *kw=keyWin(); if(!kw)return; id cur=kw.rootViewController, chatVC=nil; for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; } if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"SENT hi!"); _matching=NO; _progSwitch=YES; dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } } }
 
