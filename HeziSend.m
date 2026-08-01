@@ -221,45 +221,65 @@ static id findA11yElement(NSString *text, id container) {
     return nil;
 }
 
+// UITouch 私有方法
+@interface UITouch (HZPrivate)
+- (void)setPhase:(NSInteger)phase;
+- (void)setWindow:(UIWindow *)window;
+- (void)setView:(UIView *)view;
+- (void)_setLocationInWindow:(CGPoint)location resetPrevious:(BOOL)resetPrevious;
+@end
+
+static void injectTap(CGFloat x, CGFloat y) {
+    UIWindow *kw = keyWin();
+    if (!kw) return;
+    CGPoint pt = CGPointMake(x, y);
+    UIView *hit = [kw hitTest:pt withEvent:nil];
+    if (!hit) return;
+
+    Class tc = NSClassFromString(@"UITouch");
+    if (!tc) return;
+    id touch = ((id(*)(Class,SEL))objc_msgSend)(tc, @selector(alloc));
+    // 尝试 init 或 initWithLocationInWindow:
+    SEL initSel = NSSelectorFromString(@"initWithLocationInWindow:");
+    if ([touch respondsToSelector:initSel]) {
+        touch = ((id(*)(id,SEL,CGPoint))objc_msgSend)(touch, initSel, pt);
+    } else {
+        touch = ((id(*)(id,SEL))objc_msgSend)(touch, @selector(init));
+    }
+
+    // 设置属性
+    SEL setPhase = NSSelectorFromString(@"setPhase:");
+    SEL setWindow = NSSelectorFromString(@"setWindow:");
+    SEL setView = NSSelectorFromString(@"setView:");
+    SEL setLoc = NSSelectorFromString(@"_setLocationInWindow:resetPrevious:");
+
+    if ([touch respondsToSelector:setPhase]) ((void(*)(id,SEL,NSInteger))objc_msgSend)(touch, setPhase, 0); // began
+    if ([touch respondsToSelector:setWindow]) ((void(*)(id,SEL,id))objc_msgSend)(touch, setWindow, kw);
+    if ([touch respondsToSelector:setView]) ((void(*)(id,SEL,id))objc_msgSend)(touch, setView, hit);
+    if ([touch respondsToSelector:setLoc]) ((void(*)(id,SEL,CGPoint,BOOL))objc_msgSend)(touch, setLoc, pt, YES);
+
+    SEL beganSel = @selector(touchesBegan:withEvent:);
+    SEL endedSel = @selector(touchesEnded:withEvent:);
+    NSSet *set = [NSSet setWithObject:touch];
+
+    if ([hit respondsToSelector:beganSel]) ((void(*)(id,SEL,id,id))objc_msgSend)(hit, beganSel, set, nil);
+    if ([touch respondsToSelector:setPhase]) ((void(*)(id,SEL,NSInteger))objc_msgSend)(touch, setPhase, 3); // ended
+    if ([hit respondsToSelector:endedSel]) ((void(*)(id,SEL,id,id))objc_msgSend)(hit, endedSel, set, nil);
+}
+
 static void doMatch(void) {
     LOG(@"doMatch() called");
     @try {
-        UIWindow *kw = keyWin(); if (!kw) { LOG(@"doMatch: no keyWindow"); return; }
-        // 方式1: 辅助功能找匹配按钮（尝试各种可能的标签）
-        NSArray *labels = @[@"匹配", @"开始匹配", @"在线匹配", @"随机匹配", @"视频匹配",
-                            @"语音匹配", @"快速匹配", @"match", @"start", @"开始",
-                            @"配对", @"连线", @"速配", @"聊", @"连麦"];
-        for (NSString *lb in labels) {
-            id el = findA11yElement(lb, kw);
-            if (el) {
-                LOG(@"Match: a11y found '%@', activating", lb);
-                [el accessibilityActivate];
-                _lastMatch = [[NSDate date] timeIntervalSince1970];
-                return;
-            }
-        }
-        LOG(@"doMatch: a11y all nil");
-
-        // 方式2: 找 HZRandomMatchViewController
-        Class mc = objc_getClass("HZRandomMatchViewController"); if (!mc) return;
-        id vc = nil; if (kw) { // 简单遍历 presented/viewControllers
-            id cur = kw.rootViewController;
-            for (int i = 0; i < 20 && cur && !vc; i++) {
-                if ([cur isKindOfClass:mc]) { vc = cur; break; }
-                id pres = ((id(*)(id,SEL))objc_msgSend)(cur, sel_registerName("presentedViewController"));
-                if (pres) { cur = pres; continue; }
-                SEL vs = sel_registerName("viewControllers");
-                if ([cur respondsToSelector:vs]) { NSArray *vcs = ((id(*)(id,SEL))objc_msgSend)(cur, vs); if (vcs.count > 0) { cur = vcs.lastObject; continue; } }
-                break;
-            }
-        }
-        if (vc) {
-            id model = ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("model"));
-            SEL bs = sel_registerName("buttonActionWithModel:");
-            if (model && [vc respondsToSelector:bs]) { ((void(*)(id,SEL,id))objc_msgSend)(vc, bs, model); _lastMatch = [[NSDate date] timeIntervalSince1970]; LOG(@"Match: buttonActionWithModel"); return; }
-            SEL rs = sel_registerName("requestData");
-            if ([vc respondsToSelector:rs]) { ((void(*)(id,SEL))objc_msgSend)(vc, rs); _lastMatch = [[NSDate date] timeIntervalSince1970]; LOG(@"Match: requestData"); }
-        }
+        CGFloat sw = [UIScreen mainScreen].bounds.size.width;
+        CGFloat sh = [UIScreen mainScreen].bounds.size.height;
+        // 尝试常见匹配按钮位置（屏幕中下方）
+        injectTap(sw * 0.50, sh * 0.72);
+        usleep(150000);
+        injectTap(sw * 0.50, sh * 0.68);
+        usleep(150000);
+        injectTap(sw * 0.50, sh * 0.65);
+        _lastMatch = [[NSDate date] timeIntervalSince1970];
+        LOG(@"Match: injected taps at (%.0f%%,%.0f%%)-(%.0f%%,%.0f%%)", sw*0.50, sh*0.65, sw*0.50, sh*0.72);
     } @catch (NSException *e) { LOG(@"Match crash: %@", e); }
 }
 
