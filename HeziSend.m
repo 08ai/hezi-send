@@ -301,7 +301,26 @@ static void installFlutterHooks(void) {
             LOG(@"FBMC hook OK");
         }
     }
-    // 3. Hook PhotonIMClient sendMessage:completion: (抓所有 Photon 消息)
+    // 3. Hook HZHTTPRequest start — 抓所有 HTTP 请求
+    Class hzr = objc_getClass("HZHTTPRequest");
+    if(hzr){
+        Method rqm = class_getInstanceMethod(hzr, sel_registerName("start"));
+        if(rqm){
+            IMP origRQ = method_setImplementation(rqm, imp_implementationWithBlock(^(id self){
+                // 读 URL/headers/body
+                id url = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("url"));
+                id headers = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("headers"));
+                id body = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("body"));
+                id method = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("httpMethod"));
+                LOG(@"HZHTTP: %@ %@ headers=%@ body=%@", method, url, headers, body);
+                IMP old = class_getMethodImplementation(hzr, sel_registerName("_hz_http_orig"));
+                if(old) ((void(*)(id,SEL))old)(self, sel_registerName("start"));
+            }));
+            class_addMethod(hzr, sel_registerName("_hz_http_orig"), origRQ, method_getTypeEncoding(rqm));
+            LOG(@"HZHTTP hook OK");
+        }
+    }
+    // 4. Hook PhotonIMClient sendMessage:completion: (抓所有 Photon 消息)
     Class pic = objc_getClass("PhotonIMClient");
     if(pic){
         Method pm = class_getInstanceMethod(pic, sel_registerName("sendMessage:completion:"));
