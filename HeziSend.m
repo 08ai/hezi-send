@@ -405,9 +405,12 @@ static void doMatch(void) {
         }
         _lastMatch = [[NSDate date] timeIntervalSince1970];
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            sendHiIfMatched();
-        });
+        // 匹配后持续检测聊天页，一旦出现就发"嗨"
+        for (int delay = 4; delay <= 30; delay += 2) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                if (_matching) sendHiIfMatched();
+            });
+        }
     } @catch (NSException *e) {
         LOG(@"Match crash: %@", e);
     }
@@ -480,18 +483,6 @@ static void swizzleMatchClass(void) {
     unsigned int count = 0;
     Method *methods = class_copyMethodList(cls, &count);
     if (!methods) return;
-    LOG(@"Swizzling %u methods on HZRandomMatchViewController...", count);
-    for (unsigned int i = 0; i < count; i++) {
-        SEL sel = method_getName(methods[i]);
-        IMP orig = method_getImplementation(methods[i]);
-        NSString *selStr = NSStringFromSelector(sel);
-        // 只 hook viewDidAppear 等生命周期 + 自定义方法
-        if ([selStr hasPrefix:@"view"] || [selStr hasPrefix:@"init"] ||
-            [selStr hasPrefix:@"_"] || [selStr hasPrefix:@"."]) continue;
-        // 给每个方法包一层日志
-        // 用 block imp 太复杂，简化：只记录第一个非系统方法的调用
-        LOG(@"  Method[%u]: %@", i, selStr);
-    }
     free(methods);
 
     // Hook viewDidAppear: 来判断进入了匹配页
