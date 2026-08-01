@@ -46,6 +46,15 @@ static void sendHZHTTP(NSString *url){
             LOG(@"HZHTTP resp: %@", r);
             // 从 response 提取 userid 直接发嗨
             if(r && [r respondsToSelector:sel_registerName("objectForKey:")]){
+                // 检测匹配次数耗尽：ec 错误码 或 data 为空
+                id ec=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"ec");
+                int errCode=ec?[ec intValue]:0;
+                if(errCode!=0 && errCode!=200){
+                    LOG(@"Match exhausted (ec=%d), stopping",errCode);
+                    _matching=NO;_progSwitch=YES;
+                    dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;});
+                    return;
+                }
                 id uid=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"userid");
                 if(!uid){id data=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"data");
                     if(data)uid=((id(*)(id,SEL,id))objc_msgSend)(data,sel_registerName("objectForKey:"),@"userid");}
@@ -55,7 +64,7 @@ static void sendHZHTTP(NSString *url){
                 }}
             }
         } forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
-        @try{[cfg setValue:^(NSError *e){LOG(@"HZHTTP err:%@",e);} forKey:@"requestFailureBlock"];}@catch(NSException *e){}
+        @try{[cfg setValue:^(NSError *e){LOG(@"HZHTTP err:%@",e); if([url containsString:@"like/find/match"]&&![url containsString:@"card"]){ _matching=NO;_progSwitch=YES;dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } } forKey:@"requestFailureBlock"];}@catch(NSException *e){}
     }
     if([req respondsToSelector:@selector(start)]){((void(*)(id,SEL))objc_msgSend)(req,@selector(start));LOG(@"HZHTTP sent:%@",url);}
 }
