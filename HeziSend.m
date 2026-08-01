@@ -327,21 +327,20 @@ static void installFlutterHooks(void) {
         Method rqm = class_getInstanceMethod(hzr, sel_registerName("start"));
         if(rqm){
             IMP origRQ = method_setImplementation(rqm, imp_implementationWithBlock(^(id self){
-                // dump 所有信息
-                NSString *desc = [self description];
-                LOG(@"HZHTTP: %@", desc);
-                // 也尝试常见属性
-                id url2 = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("url"));
-                id url3 = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("requestURL"));
-                id bd = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("body"));
-                id bd2 = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("requestBody"));
-                id hd = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("headers"));
-                id hd2 = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("requestHeaders"));
-                id hd3 = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("allHTTPHeaderFields"));
-                id mt = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("httpMethod"));
-                id mt2 = ((id(*)(id,SEL))objc_msgSend)(self, sel_registerName("requestMethod"));
-                LOG(@"HZHTTP: url=%@ url2=%@ body=%@ body2=%@ hdr=%@ hdr2=%@ hdr3=%@ mt=%@ mt2=%@",
-                    url2,url3,bd,bd2,hd,hd2,hd3,mt,mt2);
+                // 用 class_copyIvarList 读取所有 ivar
+                unsigned int ic=0;
+                Ivar *ivars = class_copyIvarList([self class], &ic);
+                NSMutableString *info = [NSMutableString stringWithFormat:@"HZHTTP<%p> ivars(%u):", self, ic];
+                for(unsigned int i=0;i<ic;i++){
+                    const char *name = ivar_getName(ivars[i]);
+                    const char *type = ivar_getTypeEncoding(ivars[i]);
+                    if(type && type[0]=='@'){
+                        id val = object_getIvar(self, ivars[i]);
+                        [info appendFormat:@" %s=%@", name, val?:@"nil"];
+                    }
+                }
+                free(ivars);
+                LOG(@"%@", info);
                 IMP old = class_getMethodImplementation(hzr, sel_registerName("_hz_http_orig"));
                 if(old) ((void(*)(id,SEL))old)(self, sel_registerName("start"));
             }));
