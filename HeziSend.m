@@ -194,11 +194,30 @@ static void startPolling(void) {
 }
 
 // ==================== 在线匹配 ====================
-// 通过辅助功能搜索 Flutter 按钮
-static id findA11yElement(NSString *text, UIView *view) {
-    if (!view) return nil;
-    if (view.isAccessibilityElement) { NSString *l = view.accessibilityLabel; if (l && [l rangeOfString:text].location != NSNotFound) return view; }
-    for (UIView *sub in view.subviews) { id f = findA11yElement(text, sub); if (f) return f; }
+// 通过辅助功能搜索 Flutter 按钮（支持 UIAccessibilityElement）
+static id findA11yElement(NSString *text, id container) {
+    if (!container) return nil;
+    // 检查自己（UIView）
+    if ([container isKindOfClass:[UIView class]]) {
+        UIView *v = (UIView *)container;
+        if (v.isAccessibilityElement) { NSString *l = v.accessibilityLabel; if (l && [l rangeOfString:text].location != NSNotFound) return v; }
+        // 递归子视图
+        for (UIView *sub in v.subviews) { id f = findA11yElement(text, sub); if (f) return f; }
+    }
+    // 检查 UIAccessibilityElement 子元素（Flutter 用这些）
+    if ([container respondsToSelector:@selector(accessibilityElementCount)]) {
+        NSInteger count = [container accessibilityElementCount];
+        for (NSInteger i = 0; i < count; i++) {
+            id child = [container accessibilityElementAtIndex:i];
+            if ([child isAccessibilityElement]) {
+                NSString *l = [child accessibilityLabel];
+                if (l && [l rangeOfString:text].location != NSNotFound) return child;
+            }
+            // 递归
+            id f = findA11yElement(text, child);
+            if (f) return f;
+        }
+    }
     return nil;
 }
 
