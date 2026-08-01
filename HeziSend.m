@@ -508,6 +508,10 @@ static void sendHiIfMatched(void) {
             if ([chatVC respondsToSelector:sendSel]) {
                 ((void(*)(id,SEL,id,id))objc_msgSend)(chatVC, sendSel, @"嗨", nil);
                 LOG(@"Match: SENT hi via %@!", cn);
+                _matching = NO; // 发完关匹配
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [_matchSwitch setOn:NO animated:YES];
+                });
                 return;
             }
         }
