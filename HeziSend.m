@@ -174,6 +174,16 @@ static void sendMsg(NSString *uid, NSString *text) {
 static void sendAll(NSString *text) {
     if (_sending || !text || text.length == 0 || [text isEqualToString:@"1"]) return;
     _sending = YES;
+
+    // 按 ### 分段，去掉空段
+    NSArray<NSString*> *segments = [text componentsSeparatedByString:@"###"];
+    NSMutableArray<NSString*> *msgs = [NSMutableArray array];
+    for (NSString *s in segments) {
+        NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (t.length > 0) [msgs addObject:t];
+    }
+    if (msgs.count == 0) { _sending = NO; return; }
+
     NSArray<NSString*> *uids = loadUserIDs();
     _totalUsers = uids.count;
     _sentCount  = 0;
@@ -183,18 +193,23 @@ static void sendAll(NSString *text) {
         setBtnText(@"轮询\n中");
         return;
     }
-    LOG(@"sendAll start: \"%@\" → %ld users", text, (long)_totalUsers);
+    NSInteger totalMsgs = msgs.count;
+    LOG(@"sendAll: %ld users × %ld msgs", (long)_totalUsers, (long)totalMsgs);
     setBtnText([NSString stringWithFormat:@"0/%ld", (long)_totalUsers]);
-    toast([NSString stringWithFormat:@"开始群发 %ld 人", (long)_totalUsers]);
+    toast([NSString stringWithFormat:@"群发 %ld人×%ld条", (long)_totalUsers, (long)totalMsgs]);
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         for (NSInteger i = 0; i < uids.count; i++) {
-            dispatch_sync(dispatch_get_main_queue(), ^{ sendMsg(uids[i], text); });
+            // 给同一个用户依次发送每条消息
+            for (NSInteger j = 0; j < totalMsgs; j++) {
+                dispatch_sync(dispatch_get_main_queue(), ^{ sendMsg(uids[i], msgs[j]); });
+                if (j < totalMsgs - 1) usleep(200000); // 两条消息之间 200ms
+            }
             _sentCount = i + 1;
             dispatch_async(dispatch_get_main_queue(), ^{
                 setBtnText([NSString stringWithFormat:@"%ld/%ld", (long)_sentCount, (long)_totalUsers]);
             });
-            usleep(800000); // 800ms
+            usleep(600000); // 用户之间 600ms
         }
         dispatch_sync(dispatch_get_main_queue(), ^{
             _lastSend = [[NSDate date] timeIntervalSince1970];
