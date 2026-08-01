@@ -434,9 +434,30 @@ static void doMatch(void) {
             }
         }
 
-        // 延迟执行匹配动作（等页面加载完）
+        // 延迟执行匹配动作
         id vcRef = matchVC;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            // 先获取 requestManager，它应该是真正的匹配业务对象
+            id mgr = ((id(*)(id,SEL))objc_msgSend)(vcRef, sel_registerName("requestManager"));
+            LOG(@"Match: requestManager=%@", mgr ? @"exists" : @"nil");
+            if (mgr) {
+                // Try common methods on the manager
+                SEL mgrSels[] = {
+                    sel_registerName("start"),
+                    sel_registerName("request"),
+                    sel_registerName("startRequest"),
+                    sel_registerName("send"),
+                    sel_registerName("begin"),
+                };
+                for (int i = 0; i < 5; i++) {
+                    if ([mgr respondsToSelector:mgrSels[i]]) {
+                        ((void(*)(id,SEL))objc_msgSend)(mgr, mgrSels[i]);
+                        LOG(@"Match: called requestManager method #%d", i);
+                        break;
+                    }
+                }
+            }
+            // 同时也调用 buttonActionWithModel
             id model = ((id(*)(id,SEL))objc_msgSend)(vcRef, sel_registerName("model"));
             if (model) {
                 SEL btnSel = sel_registerName("buttonActionWithModel:");
@@ -444,12 +465,12 @@ static void doMatch(void) {
                     ((void(*)(id,SEL,id))objc_msgSend)(vcRef, btnSel, model);
                     LOG(@"Match: buttonActionWithModel called");
                 }
-            } else {
-                SEL reqSel = sel_registerName("requestData");
-                if ([vcRef respondsToSelector:reqSel]) {
-                    ((void(*)(id,SEL))objc_msgSend)(vcRef, reqSel);
-                    LOG(@"Match: requestData called");
-                }
+            }
+            // 也调 requestData
+            SEL reqSel = sel_registerName("requestData");
+            if ([vcRef respondsToSelector:reqSel]) {
+                ((void(*)(id,SEL))objc_msgSend)(vcRef, reqSel);
+                LOG(@"Match: requestData called");
             }
         });
         _lastMatch = [[NSDate date] timeIntervalSince1970];
