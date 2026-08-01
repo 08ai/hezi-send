@@ -489,25 +489,30 @@ static void doMatch(void) {
 static void sendHiIfMatched(void) {
     LOG(@"sendHi: called, matching=%d", _matching);
     if (!_matching) return;
-    Class chatCls = objc_getClass("MDChatSingleViewController");
-    if (!chatCls) { LOG(@"sendHi: MDChatSingleVC class missing"); return; }
 
-    id chatVC = nil;
-    UIWindow *kw = keyWin();
-    if (kw) chatVC = findMatchVC(chatCls, kw.rootViewController, 0);
-    if (!chatVC) {
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            chatVC = findMatchVC(chatCls, w.rootViewController, 0);
-            if (chatVC) break;
+    // 搜索所有可能的聊天 VC 类
+    NSArray *chatClasses = @[@"MDChatSingleViewController", @"HZMessageViewController"];
+    for (NSString *cn in chatClasses) {
+        Class chatCls = objc_getClass([cn UTF8String]);
+        if (!chatCls) continue;
+
+        id chatVC = nil;
+        UIWindow *kw = keyWin();
+        if (kw) chatVC = findMatchVC(chatCls, kw.rootViewController, 0);
+        if (!chatVC) {
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                chatVC = findMatchVC(chatCls, w.rootViewController, 0);
+                if (chatVC) break;
+            }
         }
-    }
-    LOG(@"sendHi: chatVC=%@", chatVC ? @"FOUND" : @"NOT FOUND");
-
-    if (chatVC) {
-        SEL sendSel = sel_registerName("sendMessageText:extInfo:");
-        if ([chatVC respondsToSelector:sendSel]) {
-            ((void(*)(id,SEL,id,id))objc_msgSend)(chatVC, sendSel, @"嗨", nil);
-            LOG(@"Match: SENT hi!");
+        LOG(@"sendHi: %@ = %@", cn, chatVC ? @"FOUND" : @"nil");
+        if (chatVC) {
+            SEL sendSel = sel_registerName("sendMessageText:extInfo:");
+            if ([chatVC respondsToSelector:sendSel]) {
+                ((void(*)(id,SEL,id,id))objc_msgSend)(chatVC, sendSel, @"嗨", nil);
+                LOG(@"Match: SENT hi via %@!", cn);
+                return;
+            }
         }
     }
 }
