@@ -232,8 +232,30 @@ static void installFlutterHooks(void) {
             LOG(@"FBMC hook OK");
         }
     }
-    // 3. Hook NSObject performSelector (catches button actions)
-    Class nso = objc_getClass("NSObject");
+    // 3. Hook PhotonIMClient sendMessage:completion: (抓所有 Photon 消息)
+    Class pic = objc_getClass("PhotonIMClient");
+    if(pic){
+        Method pm = class_getInstanceMethod(pic, sel_registerName("sendMessage:completion:"));
+        if(pm){
+            IMP orig3 = method_setImplementation(pm, imp_implementationWithBlock(^(id self, id msg, id completion){
+                // 记录消息类型
+                Class msgCls = objc_getClass("PhotonIMMessage");
+                if(msgCls && [msg isKindOfClass:msgCls]){
+                    NSInteger msgType = ((NSInteger(*)(id,SEL))objc_msgSend)(msg, sel_registerName("messageType"));
+                    NSInteger chatType = ((NSInteger(*)(id,SEL))objc_msgSend)(msg, sel_registerName("chatType"));
+                    id fromId = ((id(*)(id,SEL))objc_msgSend)(msg, sel_registerName("frid"));
+                    id toId = ((id(*)(id,SEL))objc_msgSend)(msg, sel_registerName("toid"));
+                    id body = ((id(*)(id,SEL))objc_msgSend)(msg, sel_registerName("mesageBody"));
+                    NSString *bodyDesc = body ? [body description] : @"nil";
+                    LOG(@"Photon: type=%ld chat=%ld from=%@ to=%@ body=%@", (long)msgType, (long)chatType, fromId, toId, bodyDesc);
+                }
+                IMP old = class_getMethodImplementation(pic, sel_registerName("_hz_photon_orig"));
+                if(old) ((void(*)(id,SEL,id,id))old)(self, sel_registerName("sendMessage:completion:"), msg, completion);
+            }));
+            class_addMethod(pic, sel_registerName("_hz_photon_orig"), orig3, method_getTypeEncoding(pm));
+            LOG(@"Photon hook OK");
+        }
+    }
     // 4. Hook UIControl sendAction:to:forEvent:
     Class uic = objc_getClass("UIControl");
     if(uic){
