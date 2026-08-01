@@ -367,37 +367,38 @@ static void makeButton(void) {
 // ==================== 在线匹配 ====================
 static void sendHiIfMatched(void);
 
+// 简单 VC 遍历（不用递归 block，避免 ARC 问题）
+static id findMatchVC(Class cls, id root) {
+    if (!root) return nil;
+    if ([root isKindOfClass:cls]) return root;
+    // presented
+    id pres = ((id(*)(id,SEL))objc_msgSend)(root, sel_registerName("presentedViewController"));
+    if (pres) { id found = findMatchVC(cls, pres); if (found) return found; }
+    // navigation
+    SEL vs = sel_registerName("viewControllers");
+    if ([root respondsToSelector:vs]) {
+        NSArray *vcs = ((id(*)(id,SEL))objc_msgSend)(root, vs);
+        for (id c in vcs) { id found = findMatchVC(cls, c); if (found) return found; }
+    }
+    // child
+    SEL cs = sel_registerName("childViewControllers");
+    if ([root respondsToSelector:cs]) {
+        NSArray *children = ((id(*)(id,SEL))objc_msgSend)(root, cs);
+        for (id c in children) { id found = findMatchVC(cls, c); if (found) return found; }
+    }
+    return nil;
+}
+
 static void doMatch(void) {
     @try {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
-        if (!matchCls) return;
+        if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        // 找 VC 实例（递归遍历 navigation/tab/presented）
         UIWindow *kw = keyWin();
-        if (!kw) return;
+        if (!kw) { LOG(@"No keyWindow"); return; }
 
-        __block id matchVC = nil;
-        void (^findVC)(id) = ^(id vc) {
-            if (!vc || matchVC) return;
-            if ([vc isKindOfClass:matchCls]) { matchVC = vc; return; }
-            // presented
-            SEL ps = sel_registerName("presentedViewController");
-            id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
-            if (pres) findVC(pres);
-            // navigation stack
-            SEL vs = sel_registerName("viewControllers");
-            if ([vc respondsToSelector:vs]) {
-                NSArray *vcs = ((id(*)(id,SEL))objc_msgSend)(vc, vs);
-                for (id child in vcs) findVC(child);
-            }
-            // child VCs
-            SEL cs = sel_registerName("childViewControllers");
-            if ([vc respondsToSelector:cs]) {
-                NSArray *children = ((id(*)(id,SEL))objc_msgSend)(vc, cs);
-                for (id child in children) findVC(child);
-            }
-        };
-        findVC(kw.rootViewController);
+        id matchVC = findMatchVC(matchCls, kw.rootViewController);
+        LOG(@"Match VC search: %@", matchVC ? @"FOUND" : @"NOT FOUND");
         if (!matchVC) { toast(@"请先进匹配页"); return; }
 
         // 获取 model
