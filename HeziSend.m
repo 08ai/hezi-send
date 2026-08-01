@@ -27,18 +27,7 @@ static void doMatch(void); // forward
 static NSString* findDBPath(void) { NSArray *p=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES); if(!p.count)return nil; NSString *d=[p[0] stringByAppendingPathComponent:@"db"]; NSFileManager *f=[NSFileManager defaultManager]; NSArray *fs=[f contentsOfDirectoryAtPath:d error:nil]; NSString *r=nil; unsigned long long m=0; for(NSString *n in fs){ if(![n hasPrefix:@"u."]||![n hasSuffix:@".sqlite"])continue; if([n rangeOfString:@"wal"].location!=NSNotFound||[n rangeOfString:@"shm"].location!=NSNotFound||[n rangeOfString:@"backup"].location!=NSNotFound)continue; NSString *fp=[d stringByAppendingPathComponent:n]; NSDictionary *a=[f attributesOfItemAtPath:fp error:nil]; if(a&&[a fileSize]>m){m=[a fileSize];r=fp;} } return r; }
 static NSArray* loadUserIDs(void) { NSString *dp=findDBPath(); if(!dp)return @[]; NSMutableArray *a=[NSMutableArray array]; sqlite3 *db=NULL; if(sqlite3_open([dp UTF8String],&db)!=SQLITE_OK)return @[]; sqlite3_stmt *st=NULL; if(sqlite3_prepare_v2(db,"SELECT s_sessionID FROM md_default_session WHERE s_sessionID NOT LIKE 'key_%'",-1,&st,NULL)==SQLITE_OK){ while(sqlite3_step(st)==SQLITE_ROW){ const char *c=(const char*)sqlite3_column_text(st,0); if(!c)continue; NSString *s=[NSString stringWithUTF8String:c]; if([s rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location==NSNotFound&&s.length>0)[a addObject:s]; } sqlite3_finalize(st); } sqlite3_close(db); return a; }
 
-static void sendMsg(NSString *uid,NSString *text) {
-    Class pic=objc_getClass("PhotonIMClient"),pimsg=objc_getClass("PhotonIMMessage"),pibody=objc_getClass("PhotonIMTextBody");
-    if(!pic||!pimsg||!pibody)return;
-    id c=((id(*)(Class,SEL))objc_msgSend)(pic,sel_registerName("sharedClient"));if(!c)return;
-    id body=((id(*)(Class,SEL,id))objc_msgSend)(pibody,sel_registerName("textBodyWithText:"),text);if(!body)return;
-    id mid=@"48051782";
-    id msg=((id(*)(Class,SEL,id,id,NSInteger,NSInteger))objc_msgSend)(pimsg,sel_registerName("commonMessageWithFrid:toid:messageType:chatType:"),mid,uid,1,1);
-    if(!msg)return;
-    ((void(*)(id,SEL,id))objc_msgSend)(msg,sel_registerName("setMesageBody:"),body);
-    SEL ss=sel_registerName("sendMessage:completion:");
-    if([c respondsToSelector:ss]) ((void(*)(id,SEL,id,id))objc_msgSend)(c,ss,msg,nil);
-}
+static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDChatSingleViewController"); if(!c)return; id vc=((id(*)(Class,SEL))objc_msgSend)(c,sel_registerName("alloc")); vc=((id(*)(id,SEL,id,NSInteger))objc_msgSend)(vc,sel_registerName("initWithTargetID:sceneType:"),uid,1); if(vc)((void(*)(id,SEL,id,id))objc_msgSend)(vc,sel_registerName("sendMessageText:extInfo:"),text,nil); }
 static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
@@ -70,7 +59,8 @@ static void sendHZHTTP(NSString *url){
                 if(!uid){id data=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"data");
                     if(data)uid=((id(*)(id,SEL,id))objc_msgSend)(data,sel_registerName("objectForKey:"),@"userid");}
                 if(uid){NSString *sid=[uid description];if(sid.length>3&&![sid isEqualToString:@"1"]){
-                    dispatch_async(dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");});
+                    dispatch_async(dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");}); \
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");}); \
                     LOG(@"MATCHED -> %@",sid);
                 }}
             }
