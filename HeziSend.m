@@ -306,8 +306,8 @@ static void makeButton(void) {
         [kw addSubview:_btn];
         LOG(@"Send button at (%.0f,%.0f)", bx, by);
 
-        // ── 匹配按钮 (蓝色，发送按钮下方) ──
-        CGFloat mby = by + bs + 10;
+        // ── 匹配按钮 (蓝色，发送按钮上方) ──
+        CGFloat mby = by - bs - 10;
         _matchBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         _matchBtn.frame = CGRectMake(bx, mby, bs, bs);
         _matchBtn.backgroundColor = [[UIColor colorWithRed:0.1 green:0.4 blue:0.9 alpha:1] colorWithAlphaComponent:0.92];
