@@ -25,7 +25,7 @@ static void hzLog(NSString *msg) {
 // ==================== 全局状态 ====================
 static BOOL           _sending     = NO;
 static BOOL           _polling     = YES;
-static BOOL           _matching    = NO;
+static volatile BOOL  _matching    = NO;
 static BOOL           _progSwitch  = NO;
 static NSTimeInterval _lastSend    = 0;
 static NSTimeInterval _lastMatch   = 0;
