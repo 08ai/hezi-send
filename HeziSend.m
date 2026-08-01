@@ -203,10 +203,12 @@ static id findA11yElement(NSString *text, UIView *view) {
 }
 
 static void doMatch(void) {
+    LOG(@"doMatch() called");
     @try {
-        UIWindow *kw = keyWin(); if (!kw) return;
+        UIWindow *kw = keyWin(); if (!kw) { LOG(@"doMatch: no keyWindow"); return; }
         // 方式1: 辅助功能找"匹配"按钮（对 Flutter 有效）
         id el = findA11yElement(@"匹配", kw);
+        LOG(@"doMatch: a11y result=%@", el ? @"FOUND" : @"nil");
         if (el) { LOG(@"Match: a11y element found, activating"); [el accessibilityActivate]; _lastMatch = [[NSDate date] timeIntervalSince1970]; return; }
 
         // 方式2: 找 HZRandomMatchViewController
