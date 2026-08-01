@@ -48,14 +48,27 @@ static NSString      *_deviceNum  = nil;  // shebeihao.txt 内容
 
 // ==================== 设备号 ====================
 static NSString* loadDeviceNum(void) {
+    // 优先读沙箱外（恢复数据不会覆盖）：/var/mobile/Documents/shebeihao.txt
+    NSString *extPath = @"/var/mobile/Documents/shebeihao.txt";
+    NSString *s = [NSString stringWithContentsOfFile:extPath encoding:NSUTF8StringEncoding error:nil];
+    if (s) {
+        s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        LOG(@"DeviceNum (external): %@", s);
+        return s;
+    }
+    // 回退：App 内 Documents/shebeihao.txt
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (!paths.count) return @"";
-    NSString *fp = [paths[0] stringByAppendingPathComponent:@"shebeihao.txt"];
-    NSString *s = [NSString stringWithContentsOfFile:fp encoding:NSUTF8StringEncoding error:nil];
-    if (!s) return @"";
-    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    LOG(@"DeviceNum: %@", s);
-    return s;
+    if (paths.count) {
+        NSString *fp = [paths[0] stringByAppendingPathComponent:@"shebeihao.txt"];
+        s = [NSString stringWithContentsOfFile:fp encoding:NSUTF8StringEncoding error:nil];
+        if (s) {
+            s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            LOG(@"DeviceNum (sandbox): %@", s);
+            return s;
+        }
+    }
+    LOG(@"DeviceNum: not found");
+    return @"";
 }
 
 // ==================== 按钮文本拼接 ====================
