@@ -49,6 +49,9 @@ static UILabel       *_matchLabel  = nil;
 static NSInteger      _totalUsers = 0;
 static NSInteger      _sentCount  = 0;
 static NSString      *_deviceNum  = nil;  // shebeihao.txt 内容
+static id             _capturedMatchVC = nil; // navigation hook 截获的真实匹配 VC
+static IMP            _origPushIMP = NULL;
+static IMP            _origPresentIMP = NULL;
 
 // ==================== 设备号 ====================
 static NSString* loadDeviceNum(void) {
@@ -547,10 +550,6 @@ static void onMatchToggle(id self, SEL _cmd) {
 }
 
 // ==================== Navigation Hook：截获匹配页 VC ====================
-static id _capturedMatchVC = nil;
-static IMP _origPushIMP = NULL;
-static IMP _origPresentIMP = NULL;
-
 static void captureMatchVC(id vc) {
     Class matchCls = objc_getClass("HZRandomMatchViewController");
     if (matchCls && vc && [vc isKindOfClass:matchCls]) {
