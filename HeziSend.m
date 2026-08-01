@@ -1,428 +1,105 @@
-// HeziSend.m — 赫兹群发+自动匹配 dylib (MobileSubstrate 注入)
-//
-// 编译: macOS + Xcode, 见 .github/workflows/build.yml
-// 安装: HeziSend.dylib + HeziSend.plist → /var/jb/Library/MobileSubstrate/DynamicLibraries/
-
+// HeziSend.m — 赫兹群发+自动匹配 dylib
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <sqlite3.h>
 
-// ==================== 日志 ====================
 static void hzLog(NSString *msg) {
     NSLog(@"%@", msg);
     NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"hz_send.log"];
     FILE *f = fopen([path UTF8String], "a");
-    if (f) {
-        time_t now = time(NULL);
-        struct tm *tm = localtime(&now);
-        fprintf(f, "%02d:%02d:%02d %s\n", tm->tm_hour, tm->tm_min, tm->tm_sec, [msg UTF8String]);
-        fclose(f);
-    }
+    if (f) { time_t now = time(NULL); struct tm *tm = localtime(&now); fprintf(f, "%02d:%02d:%02d %s\n", tm->tm_hour, tm->tm_min, tm->tm_sec, [msg UTF8String]); fclose(f); }
 }
 #define LOG(fmt, ...) hzLog([NSString stringWithFormat:@"[HZ] " fmt, ##__VA_ARGS__])
 
-// ==================== 全局状态 ====================
-static BOOL           _sending     = NO;
-static BOOL           _polling     = YES;
-static volatile BOOL  _matching    = NO;
-static BOOL           _progSwitch  = NO;
-static NSTimeInterval _lastSend    = 0;
-static NSTimeInterval _lastMatch   = 0;
-static UIButton      *_btn         = nil;
-static UILabel       *_btnLabel    = nil;
-static UISwitch      *_matchSwitch = nil;
-static UILabel       *_matchLabel  = nil;
-static NSInteger      _totalUsers  = 0;
-static NSInteger      _sentCount   = 0;
-static NSString      *_deviceNum   = nil;
+static BOOL _sending=NO, _polling=YES, _matching=NO, _progSwitch=NO;
+static NSTimeInterval _lastSend=0, _lastMatch=0;
+static UIButton *_btn; static UILabel *_btnLabel;
+static UISwitch *_matchSwitch; static UILabel *_matchLabel;
+static NSInteger _totalUsers, _sentCount;
+static NSString *_deviceNum;
 
-// ==================== KeyWindow ====================
 static UIWindow* keyWin(void) {
-    for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-        if ([s isKindOfClass:[UIWindowScene class]])
-            for (UIWindow *w in ((UIWindowScene*)s).windows)
-                if (w.isKeyWindow) return w;
-    }
-    for (UIWindow *w in [UIApplication sharedApplication].windows)
-        if (w.isKeyWindow) return w;
+    for (UIScene *s in [UIApplication sharedApplication].connectedScenes) { if ([s isKindOfClass:[UIWindowScene class]]) for (UIWindow *w in ((UIWindowScene*)s).windows) if (w.isKeyWindow) return w; }
+    for (UIWindow *w in [UIApplication sharedApplication].windows) if (w.isKeyWindow) return w;
     return [UIApplication sharedApplication].windows.firstObject;
 }
 
-// ==================== 设备号 ====================
 static NSString* loadDeviceNum(void) {
-    NSString *extPath = @"/var/jb/shebeihao.txt";
-    NSString *s = [NSString stringWithContentsOfFile:extPath encoding:NSUTF8StringEncoding error:nil];
-    if (s) { s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; LOG(@"DeviceNum (external): %@", s); return s; }
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (paths.count) {
-        NSString *fp = [paths[0] stringByAppendingPathComponent:@"shebeihao.txt"];
-        s = [NSString stringWithContentsOfFile:fp encoding:NSUTF8StringEncoding error:nil];
-        if (s) { s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; LOG(@"DeviceNum (sandbox): %@", s); return s; }
-    }
+    NSString *s = [NSString stringWithContentsOfFile:@"/var/jb/shebeihao.txt" encoding:NSUTF8StringEncoding error:nil];
+    if (s) { s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; LOG(@"DeviceNum: %@", s); return s; }
+    NSArray *p = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    if (p.count) { s = [NSString stringWithContentsOfFile:[[p[0] stringByAppendingPathComponent:@"shebeihao.txt"] stringByExpandingTildeInPath] encoding:NSUTF8StringEncoding error:nil] ?: @""; s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if (s.length) return s; }
     return @"";
 }
-
-static NSString* labelText(NSString *status) {
-    NSString *prefix = _deviceNum ? _deviceNum : @"";
-    return [NSString stringWithFormat:@"%@%@", prefix, status];
-}
-
-// ==================== 按钮状态 ====================
+static NSString* labelText(NSString *st) { return [NSString stringWithFormat:@"%@%@", _deviceNum?:@"", st]; }
 static void setBtnText(NSString *s) { dispatch_async(dispatch_get_main_queue(), ^{ _btnLabel.text = labelText(s); }); }
 
-// ==================== Toast ====================
-static UILabel *_toast = nil;
-static void toast(NSString *msg) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *kw = keyWin(); if (!kw) return;
-        if (!_toast) {
-            CGFloat sw = [UIScreen mainScreen].bounds.size.width;
-            _toast = [[UILabel alloc] initWithFrame:CGRectMake(20, [UIScreen mainScreen].bounds.size.height - 120, sw - 40, 50)];
-            _toast.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.85];
-            _toast.textColor = [UIColor whiteColor]; _toast.textAlignment = NSTextAlignmentCenter;
-            _toast.numberOfLines = 3; _toast.layer.cornerRadius = 10; _toast.clipsToBounds = YES;
-            _toast.font = [UIFont systemFontOfSize:13]; [kw addSubview:_toast];
-        }
-        _toast.text = msg; _toast.alpha = 1;
-        [UIView animateWithDuration:2.5 animations:^{ _toast.alpha = 0; }];
-    });
-}
+static UILabel *_toast;
+static void toast(NSString *msg) { dispatch_async(dispatch_get_main_queue(), ^{ UIWindow *kw = keyWin(); if(!kw)return; if(!_toast){ CGFloat sw=[UIScreen mainScreen].bounds.size.width; _toast=[[UILabel alloc] initWithFrame:CGRectMake(20,[UIScreen mainScreen].bounds.size.height-120,sw-40,50)]; _toast.backgroundColor=[[UIColor blackColor] colorWithAlphaComponent:0.85]; _toast.textColor=[UIColor whiteColor]; _toast.textAlignment=NSTextAlignmentCenter; _toast.numberOfLines=3; _toast.layer.cornerRadius=10; _toast.clipsToBounds=YES; _toast.font=[UIFont systemFontOfSize:13]; [kw addSubview:_toast]; } _toast.text=msg; _toast.alpha=1; [UIView animateWithDuration:2.5 animations:^{_toast.alpha=0;}]; }); }
 
-// ==================== 数据库 ====================
-static NSString* findDBPath(void) {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (!paths.count) return nil;
-    NSString *dbDir = [paths[0] stringByAppendingPathComponent:@"db"];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *files = [fm contentsOfDirectoryAtPath:dbDir error:nil];
-    NSString *found = nil; unsigned long long maxSz = 0;
-    for (NSString *f in files) {
-        if (![f hasPrefix:@"u."] || ![f hasSuffix:@".sqlite"]) continue;
-        if ([f rangeOfString:@"wal"].location != NSNotFound || [f rangeOfString:@"shm"].location != NSNotFound || [f rangeOfString:@"backup"].location != NSNotFound) continue;
-        NSString *fp = [dbDir stringByAppendingPathComponent:f];
-        NSDictionary *attr = [fm attributesOfItemAtPath:fp error:nil];
-        if (attr && [attr fileSize] > maxSz) { maxSz = [attr fileSize]; found = fp; }
-    }
-    LOG(@"DB: %@ (%llu bytes)", found ?: @"NOT FOUND", maxSz);
-    return found;
-}
+// ========== DB ==========
+static NSString* findDBPath(void) { NSArray *p=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES); if(!p.count)return nil; NSString *d=[[p[0] stringByAppendingPathComponent:@"db"] stringByExpandingTildeInPath]; NSFileManager *f=[NSFileManager defaultManager]; NSArray *fs=[f contentsOfDirectoryAtPath:d error:nil]; NSString *r=nil; unsigned long long m=0; for(NSString *n in fs){ if(![n hasPrefix:@"u."]||![n hasSuffix:@".sqlite"])continue; if([n rangeOfString:@"wal"].location!=NSNotFound||[n rangeOfString:@"shm"].location!=NSNotFound||[n rangeOfString:@"backup"].location!=NSNotFound)continue; NSString *fp=[d stringByAppendingPathComponent:n]; NSDictionary *a=[f attributesOfItemAtPath:fp error:nil]; if(a&&[a fileSize]>m){m=[a fileSize];r=fp;} } LOG(@"DB: %@ (%llu)",r?:@"NOT FOUND",m); return r; }
 
-static NSArray<NSString*>* loadUserIDs(void) {
-    NSString *dbPath = findDBPath(); if (!dbPath) return @[];
-    NSMutableArray *arr = [NSMutableArray array]; sqlite3 *db = NULL;
-    if (sqlite3_open([dbPath UTF8String], &db) != SQLITE_OK) return @[];
-    sqlite3_stmt *stmt = NULL;
-    const char *sql = "SELECT s_sessionID FROM md_default_session WHERE s_sessionID NOT LIKE 'key_%'";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            const char *c = (const char*)sqlite3_column_text(stmt, 0);
-            if (!c) continue;
-            NSString *s = [NSString stringWithUTF8String:c];
-            NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-            if ([s rangeOfCharacterFromSet:nonDigits].location == NSNotFound && s.length > 0) [arr addObject:s];
-        }
-        sqlite3_finalize(stmt);
-    }
-    sqlite3_close(db);
-    LOG(@"Loaded %lu users", (unsigned long)arr.count);
-    return arr;
-}
+static NSArray<NSString*>* loadUserIDs(void) { NSString *dp=findDBPath(); if(!dp)return @[]; NSMutableArray *a=[NSMutableArray array]; sqlite3 *db=NULL; if(sqlite3_open([dp UTF8String],&db)!=SQLITE_OK)return @[]; sqlite3_stmt *st=NULL; if(sqlite3_prepare_v2(db,"SELECT s_sessionID FROM md_default_session WHERE s_sessionID NOT LIKE 'key_%'",-1,&st,NULL)==SQLITE_OK){ while(sqlite3_step(st)==SQLITE_ROW){ const char *c=(const char*)sqlite3_column_text(st,0); if(!c)continue; NSString *s=[NSString stringWithUTF8String:c]; if([s rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location==NSNotFound&&s.length>0)[a addObject:s]; } sqlite3_finalize(st); } sqlite3_close(db); LOG(@"Loaded %lu users",(unsigned long)a.count); return a; }
 
-// ==================== 发送消息 ====================
-static void sendMsg(NSString *uid, NSString *text) {
-    Class vcClass = objc_getClass("MDChatSingleViewController");
-    if (!vcClass) { LOG(@"sendMsg: class not found"); return; }
-    id vc = ((id(*)(Class,SEL))objc_msgSend)(vcClass, sel_registerName("alloc"));
-    vc = ((id(*)(id,SEL,id,NSInteger))objc_msgSend)(vc, sel_registerName("initWithTargetID:sceneType:"), uid, 1);
-    if (!vc) { LOG(@"sendMsg: init failed for %@", uid); return; }
-    ((void(*)(id,SEL,id,id))objc_msgSend)(vc, sel_registerName("sendMessageText:extInfo:"), text, nil);
-}
+// ========== SEND ==========
+static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDChatSingleViewController"); if(!c)return; id vc=((id(*)(Class,SEL))objc_msgSend)(c,sel_registerName("alloc")); vc=((id(*)(id,SEL,id,NSInteger))objc_msgSend)(vc,sel_registerName("initWithTargetID:sceneType:"),uid,1); if(vc)((void(*)(id,SEL,id,id))objc_msgSend)(vc,sel_registerName("sendMessageText:extInfo:"),text,nil); }
+static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); LOG(@"sendAll done: %ld/%ld",(long)_sentCount,(long)_totalUsers); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 
-static void sendAll(NSString *text) {
-    if (_sending || !text || text.length == 0 || [text isEqualToString:@"1"]) return;
-    _sending = YES;
-    NSArray<NSString*> *segments = [text componentsSeparatedByString:@"###"];
-    NSMutableArray<NSString*> *msgs = [NSMutableArray array];
-    for (NSString *s in segments) { NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if (t.length > 0) [msgs addObject:t]; }
-    if (msgs.count == 0) { _sending = NO; return; }
-    NSArray<NSString*> *uids = loadUserIDs();
-    _totalUsers = uids.count; _sentCount = 0;
-    if (_totalUsers == 0) { _sending = NO; toast(@"无用户"); setBtnText(@"轮询\n中"); return; }
-    NSInteger totalMsgs = msgs.count;
-    LOG(@"sendAll: %ld users x %ld msgs", (long)_totalUsers, (long)totalMsgs);
-    setBtnText([NSString stringWithFormat:@"0/%ld", (long)_totalUsers]);
-    toast([NSString stringWithFormat:@"群发 %ld人x%ld条", (long)_totalUsers, (long)totalMsgs]);
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        for (NSInteger i = 0; i < uids.count; i++) {
-            for (NSInteger j = 0; j < totalMsgs; j++) {
-                dispatch_sync(dispatch_get_main_queue(), ^{ sendMsg(uids[i], msgs[j]); });
-                if (j < totalMsgs - 1) usleep(200000);
-            }
-            _sentCount = i + 1;
-            dispatch_async(dispatch_get_main_queue(), ^{ setBtnText([NSString stringWithFormat:@"%ld/%ld", (long)_sentCount, (long)_totalUsers]); });
-            usleep(600000);
-        }
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            _lastSend = [[NSDate date] timeIntervalSince1970]; _sending = NO;
-            setBtnText(@"轮询\n中");
-            LOG(@"sendAll done: %ld/%ld", (long)_sentCount, (long)_totalUsers);
-            toast([NSString stringWithFormat:@"群发完成 %ld/%ld", (long)_sentCount, (long)_totalUsers]);
-        });
-    });
-}
+static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ LOG(@"Polling started"); while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; LOG(@"Poll: %@",s); dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){LOG(@"Poll err: %@",e);} } }); }
 
-// ==================== URL 轮询 ====================
-static void startPolling(void) {
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        LOG(@"Polling started");
-        while (_polling) { sleep(3);
-            @try {
-                NSString *urlStr = [NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@", _deviceNum ? _deviceNum : @""];
-                NSURL *url = [NSURL URLWithString:urlStr];
-                NSData *data = [NSData dataWithContentsOfURL:url]; if (!data) continue;
-                NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]; if (!s) continue;
-                s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                if (_sending || [s isEqualToString:@"1"]) continue;
-                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                if (now - _lastSend < 10) continue;
-                LOG(@"Poll trigger: %@", s);
-                dispatch_async(dispatch_get_main_queue(), ^{ sendAll(s); });
-            } @catch (NSException *e) { LOG(@"Poll error: %@", e); }
-        }
-    });
-}
-
-// ==================== 在线匹配 ====================
-// 通过辅助功能搜索 Flutter 按钮（支持 UIAccessibilityElement）
-static id findA11yElement(NSString *text, id container) {
-    if (!container) return nil;
-    // 检查自己（UIView）
-    if ([container isKindOfClass:[UIView class]]) {
-        UIView *v = (UIView *)container;
-        if (v.isAccessibilityElement) { NSString *l = v.accessibilityLabel; if (l && [l rangeOfString:text].location != NSNotFound) return v; }
-        // 递归子视图
-        for (UIView *sub in v.subviews) { id f = findA11yElement(text, sub); if (f) return f; }
-    }
-    // 检查 UIAccessibilityElement 子元素（Flutter 用这些）
-    if ([container respondsToSelector:@selector(accessibilityElementCount)]) {
-        NSInteger count = [container accessibilityElementCount];
-        for (NSInteger i = 0; i < count; i++) {
-            id child = [container accessibilityElementAtIndex:i];
-            if ([child isAccessibilityElement]) {
-                NSString *l = [child accessibilityLabel];
-                if (l && [l rangeOfString:text].location != NSNotFound) return child;
-            }
-            // 递归
-            id f = findA11yElement(text, child);
-            if (f) return f;
-        }
-    }
+// ========== MATCH ==========
+// 暴力遍历 ivars 找真正的 HZRandomMatchViewController
+static id findMatchInObj(id obj) {
+    if(!obj)return nil; Class mc=objc_getClass("HZRandomMatchViewController"); if(!mc)return nil;
+    if([obj isKindOfClass:mc])return obj;
+    unsigned int cnt=0; Ivar *ivars=class_copyIvarList([obj class],&cnt);
+    for(unsigned int i=0;i<cnt;i++){ @try{ id v=object_getIvar(obj,ivars[i]); if(v&&[v isKindOfClass:mc]){free(ivars);return v;} }@catch(NSException *e){} }
+    free(ivars);
+    for(id child in ((id(*)(id,SEL))objc_msgSend)(obj,@selector(childViewControllers))?:@[]){ id f=findMatchInObj(child); if(f)return f; }
+    id pres=((id(*)(id,SEL))objc_msgSend)(obj,@selector(presentedViewController)); if(pres){id f=findMatchInObj(pres);if(f)return f;}
     return nil;
 }
 
-// UITouch 私有方法
-@interface UITouch (HZPrivate)
-- (void)setPhase:(NSInteger)phase;
-- (void)setWindow:(UIWindow *)window;
-- (void)setView:(UIView *)view;
-- (void)_setLocationInWindow:(CGPoint)location resetPrevious:(BOOL)resetPrevious;
-@end
-
-static void injectTap(CGFloat x, CGFloat y) {
-    UIWindow *kw = keyWin();
-    if (!kw) return;
-    CGPoint pt = CGPointMake(x, y);
-    UIView *hit = [kw hitTest:pt withEvent:nil];
-    if (!hit) return;
-
-    Class tc = NSClassFromString(@"UITouch");
-    if (!tc) return;
-    id touch = ((id(*)(Class,SEL))objc_msgSend)(tc, @selector(alloc));
-    // 尝试 init 或 initWithLocationInWindow:
-    SEL initSel = NSSelectorFromString(@"initWithLocationInWindow:");
-    if ([touch respondsToSelector:initSel]) {
-        touch = ((id(*)(id,SEL,CGPoint))objc_msgSend)(touch, initSel, pt);
-    } else {
-        touch = ((id(*)(id,SEL))objc_msgSend)(touch, @selector(init));
-    }
-
-    // 设置属性
-    SEL setPhase = NSSelectorFromString(@"setPhase:");
-    SEL setWindow = NSSelectorFromString(@"setWindow:");
-    SEL setView = NSSelectorFromString(@"setView:");
-    SEL setLoc = NSSelectorFromString(@"_setLocationInWindow:resetPrevious:");
-
-    if ([touch respondsToSelector:setPhase]) ((void(*)(id,SEL,NSInteger))objc_msgSend)(touch, setPhase, 0); // began
-    if ([touch respondsToSelector:setWindow]) ((void(*)(id,SEL,id))objc_msgSend)(touch, setWindow, kw);
-    if ([touch respondsToSelector:setView]) ((void(*)(id,SEL,id))objc_msgSend)(touch, setView, hit);
-    if ([touch respondsToSelector:setLoc]) ((void(*)(id,SEL,CGPoint,BOOL))objc_msgSend)(touch, setLoc, pt, YES);
-
-    SEL beganSel = @selector(touchesBegan:withEvent:);
-    SEL endedSel = @selector(touchesEnded:withEvent:);
-    NSSet *set = [NSSet setWithObject:touch];
-
-    if ([hit respondsToSelector:beganSel]) ((void(*)(id,SEL,id,id))objc_msgSend)(hit, beganSel, set, nil);
-    if ([touch respondsToSelector:setPhase]) ((void(*)(id,SEL,NSInteger))objc_msgSend)(touch, setPhase, 3); // ended
-    if ([hit respondsToSelector:endedSel]) ((void(*)(id,SEL,id,id))objc_msgSend)(hit, endedSel, set, nil);
-}
-
 static void doMatch(void) {
-    LOG(@"doMatch() called");
+    LOG(@"doMatch()");
     @try {
-        Class mc = objc_getClass("HZRandomMatchViewController");
-        if (!mc) return;
-
-        id vc = ((id(*)(Class,SEL))objc_msgSend)([mc class], @selector(alloc));
-        vc = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(init));
-        if (!vc) { LOG(@"Match: init failed"); return; }
-
-        // Push 到当前 NavigationController（VC 需要在导航栈里才能正常工作）
-        UIWindow *kw = keyWin();
-        id curVC = kw.rootViewController;
-        while (1) {
-            id pres = ((id(*)(id,SEL))objc_msgSend)(curVC, @selector(presentedViewController));
-            if (pres) { curVC = pres; continue; }
-            break;
+        UIWindow *kw=keyWin(); if(!kw)return;
+        id matchVC=findMatchInObj(kw.rootViewController);
+        LOG(@"Match: ivar search=%@", matchVC?@"FOUND":@"nil");
+        if(matchVC){
+            id m=((id(*)(id,SEL))objc_msgSend)(matchVC,@selector(model));
+            SEL bs=NSSelectorFromString(@"buttonActionWithModel:");
+            if([matchVC respondsToSelector:bs]){((void(*)(id,SEL,id))objc_msgSend)(matchVC,bs,m);LOG(@"Match: buttonActionWithModel model=%@",m?@"yes":@"nil");}
+            SEL rs=NSSelectorFromString(@"requestData");
+            if([matchVC respondsToSelector:rs]){((void(*)(id,SEL))objc_msgSend)(matchVC,rs);LOG(@"Match: requestData");}
+            _lastMatch=[[NSDate date] timeIntervalSince1970];
         }
-        // Present modally
-        ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(curVC, @selector(presentViewController:animated:completion:), vc, NO, nil);
-        LOG(@"Match: VC presented");
-
-        // 等页面加载后触发匹配
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            // 只调匹配相关方法（不调 didTapInviteView）
-            SEL reqSel = NSSelectorFromString(@"requestData");
-            if ([vc respondsToSelector:reqSel]) {
-                ((void(*)(id,SEL))objc_msgSend)(vc, reqSel);
-                LOG(@"Match: requestData called");
-            }
-
-            // 尝试获取 model，即使 nil 也调 buttonActionWithModel
-            id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
-            SEL btnSel = NSSelectorFromString(@"buttonActionWithModel:");
-            if ([vc respondsToSelector:btnSel]) {
-                ((void(*)(id,SEL,id))objc_msgSend)(vc, btnSel, model); // model 可能 nil
-                LOG(@"Match: buttonActionWithModel called model=%@", model?@"yes":@"nil");
-            }
-        });
-
-        _lastMatch = [[NSDate date] timeIntervalSince1970];
-    } @catch (NSException *e) { LOG(@"Match crash: %@", e); }
+    }@catch(NSException *e){LOG(@"Match crash: %@",e);}
 }
 
-// 发送"嗨"
 static void sendHiIfMatched(void) {
-    if (!_matching) return;
-    Class chatCls = objc_getClass("MDChatSingleViewController");
-    if (chatCls) {
-        UIWindow *kw = keyWin(); id chatVC = nil;
-        if (kw) { id cur = kw.rootViewController;
-            for (int i = 0; i < 20 && cur && !chatVC; i++) {
-                if ([cur isKindOfClass:chatCls]) { chatVC = cur; break; }
-                id pres = ((id(*)(id,SEL))objc_msgSend)(cur, sel_registerName("presentedViewController"));
-                if (pres) { cur = pres; continue; }
-                SEL vs = sel_registerName("viewControllers");
-                if ([cur respondsToSelector:vs]) { NSArray *vcs = ((id(*)(id,SEL))objc_msgSend)(cur, vs); if (vcs.count > 0) { cur = vcs.lastObject; continue; } }
-                break;
-            }
-        }
-        if (chatVC) {
-            SEL ss = sel_registerName("sendMessageText:extInfo:");
-            if ([chatVC respondsToSelector:ss]) {
-                ((void(*)(id,SEL,id,id))objc_msgSend)(chatVC, ss, @"嗨", nil);
-                LOG(@"Match: SENT hi!");
-                _matching = NO; _progSwitch = YES;
-                dispatch_async(dispatch_get_main_queue(), ^{ [_matchSwitch setOn:NO animated:YES]; _progSwitch = NO; });
-            }
-        }
-    }
+    if(!_matching)return;
+    Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return;
+    UIWindow *kw=keyWin(); if(!kw)return;
+    id chatVC=nil, cur=kw.rootViewController;
+    for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; }
+    if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"Match: SENT hi!"); _matching=NO; _progSwitch=YES; dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } }
 }
 
-// 自动匹配循环
-static void startAutoMatch(void) {
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        LOG(@"Auto-match loop STARTED"); int tick = 0;
-        while (YES) {
-            sleep(2);
-            LOG(@"Auto-match: tick=%d matching=%d", tick, _matching);
-            if (!_matching) { tick = 0; continue; }
-            tick++;
-            dispatch_async(dispatch_get_main_queue(), ^{ sendHiIfMatched(); });
-            if (tick % 4 == 0) {
-                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                LOG(@"Auto-match: check doMatch (age=%.0fs)", now - _lastMatch);
-                if (now - _lastMatch >= 10) {
-                    dispatch_async(dispatch_get_main_queue(), ^{ doMatch(); });
-                }
-            }
-        }
-    });
-}
+static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ LOG(@"Auto-match STARTED"); int tick=0; while(1){ sleep(2); if(!_matching){tick=0;continue;} tick++; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); if(tick%4==0&&[[NSDate date] timeIntervalSince1970]-_lastMatch>=10){ dispatch_async(dispatch_get_main_queue(),^{doMatch();}); } } }); }
 
-// ==================== 匹配开关 ====================
-static void onMatchToggle(id self, SEL _cmd) {
-    if (_progSwitch) return;
-    _matching = !_matching; LOG(@"Match toggle: %@", _matching ? @"ON" : @"OFF");
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (_matching) { toast(@"自动匹配已开启"); doMatch(); } else { toast(@"自动匹配已关闭"); }
-    });
-}
+static void onMatchToggle(id self, SEL _cmd) { if(_progSwitch)return; _matching=!_matching; LOG(@"Match toggle: %@",_matching?@"ON":@"OFF"); dispatch_async(dispatch_get_main_queue(),^{ if(_matching){toast(@"自动匹配已开启");doMatch();}else{toast(@"自动匹配已关闭");} }); }
 
-// ==================== UI ====================
-static void makeButton(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *kw = keyWin();
-        if (!kw) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{ makeButton(); }); return; }
-        CGFloat sw = [UIScreen mainScreen].bounds.size.width;
-        CGFloat sh = [UIScreen mainScreen].bounds.size.height;
-        CGFloat bs = 60, bx = sw - bs - 14, by = sh * 0.35;
+// ========== UI ==========
+static void makeButton(void) { dispatch_async(dispatch_get_main_queue(),^{ UIWindow *kw=keyWin(); if(!kw){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1*NSEC_PER_SEC),dispatch_get_main_queue(),^{makeButton();});return;} CGFloat sw=[UIScreen mainScreen].bounds.size.width,sh=[UIScreen mainScreen].bounds.size.height,bs=60,bx=sw-bs-14,by=sh*0.35;
+_btn=[UIButton buttonWithType:UIButtonTypeCustom]; _btn.frame=CGRectMake(bx,by,bs,bs); _btn.backgroundColor=[[UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1] colorWithAlphaComponent:0.92]; _btn.layer.cornerRadius=bs/2; _btn.clipsToBounds=YES; _btn.layer.borderWidth=2; _btn.layer.borderColor=[UIColor whiteColor].CGColor;
+_btnLabel=[[UILabel alloc] initWithFrame:CGRectMake(2,8,bs-4,bs-16)]; _btnLabel.text=labelText(@"轮询\n中"); _btnLabel.numberOfLines=2; _btnLabel.textAlignment=NSTextAlignmentCenter; _btnLabel.font=[UIFont boldSystemFontOfSize:12]; _btnLabel.textColor=[UIColor whiteColor]; _btnLabel.userInteractionEnabled=NO; [_btn addSubview:_btnLabel]; [kw addSubview:_btn];
+CGFloat pW=80,pH=58; UIView *mp=[[UIView alloc] initWithFrame:CGRectMake(bx-10,by-pH-8,pW,pH)]; mp.backgroundColor=[[UIColor blackColor] colorWithAlphaComponent:0.55]; mp.layer.cornerRadius=12; [kw addSubview:mp];
+_matchLabel=[[UILabel alloc] initWithFrame:CGRectMake(0,4,pW,16)]; _matchLabel.text=labelText(@"匹配"); _matchLabel.font=[UIFont boldSystemFontOfSize:11]; _matchLabel.textColor=[UIColor whiteColor]; _matchLabel.textAlignment=NSTextAlignmentCenter; [mp addSubview:_matchLabel];
+_matchSwitch=[[UISwitch alloc] initWithFrame:CGRectMake((pW-51)/2,20,51,31)]; _matchSwitch.onTintColor=[UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1]; [_matchSwitch setOn:NO]; [mp addSubview:_matchSwitch];
+static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0);class_addMethod(h,sel_registerName("onMatchToggle:"),(IMP)onMatchToggle,"v@:@");objc_registerClassPair(h);t=[[h alloc] init];} [_matchSwitch addTarget:t action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
+[NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
-        // 群发按钮(绿色)
-        _btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        _btn.frame = CGRectMake(bx, by, bs, bs);
-        _btn.backgroundColor = [[UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1] colorWithAlphaComponent:0.92];
-        _btn.layer.cornerRadius = bs/2; _btn.clipsToBounds = YES;
-        _btn.layer.borderWidth = 2; _btn.layer.borderColor = [UIColor whiteColor].CGColor;
-        _btnLabel = [[UILabel alloc] initWithFrame:CGRectMake(2, 8, bs-4, bs-16)];
-        _btnLabel.text = labelText(@"轮询\n中"); _btnLabel.numberOfLines = 2; _btnLabel.textAlignment = NSTextAlignmentCenter;
-        _btnLabel.font = [UIFont boldSystemFontOfSize:12]; _btnLabel.textColor = [UIColor whiteColor]; _btnLabel.userInteractionEnabled = NO;
-        [_btn addSubview:_btnLabel]; [kw addSubview:_btn];
-
-        // 匹配开关面板(绿色按钮上方)
-        CGFloat panelW = 80, panelH = 58;
-        UIView *matchPanel = [[UIView alloc] initWithFrame:CGRectMake(bx - 10, by - panelH - 8, panelW, panelH)];
-        matchPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.55]; matchPanel.layer.cornerRadius = 12;
-        [kw addSubview:matchPanel];
-        _matchLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, panelW, 16)];
-        _matchLabel.text = labelText(@"匹配"); _matchLabel.font = [UIFont boldSystemFontOfSize:11];
-        _matchLabel.textColor = [UIColor whiteColor]; _matchLabel.textAlignment = NSTextAlignmentCenter;
-        [matchPanel addSubview:_matchLabel];
-        _matchSwitch = [[UISwitch alloc] initWithFrame:CGRectMake((panelW - 51) / 2, 20, 51, 31)];
-        _matchSwitch.onTintColor = [UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1]; [_matchSwitch setOn:NO];
-        [matchPanel addSubview:_matchSwitch];
-
-        // 开关事件
-        static id target = nil;
-        if (!target) { Class h = objc_allocateClassPair([NSObject class], "HZMatchHelper", 0); class_addMethod(h, sel_registerName("onMatchToggle:"), (IMP)onMatchToggle, "v@:@"); objc_registerClassPair(h); target = [[h alloc] init]; }
-        [_matchSwitch addTarget:target action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
-
-        LOG(@"Buttons created at (%.0f,%.0f)", bx, by);
-        [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *t) {
-            UIWindow *kw2 = keyWin();
-            if (kw2 && _btn.superview != kw2) { [_btn removeFromSuperview]; [kw2 addSubview:_btn]; }
-            if (kw2 && matchPanel.superview != kw2) { [matchPanel removeFromSuperview]; [kw2 addSubview:matchPanel]; }
-            if (kw2) { [kw2 bringSubviewToFront:_btn]; [kw2 bringSubviewToFront:matchPanel]; }
-        }];
-    });
-}
-
-// ==================== 入口 ====================
-__attribute__((constructor))
-static void HZInit(void) {
-    LOG(@"HeziSend dylib loaded"); _deviceNum = loadDeviceNum();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        makeButton(); startPolling(); startAutoMatch();
-        LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪");
-    });
-}
+__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
