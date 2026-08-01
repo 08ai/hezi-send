@@ -67,15 +67,26 @@ static void doMatch(void) {
     @try {
         UIWindow *kw=keyWin(); if(!kw)return;
         id matchVC=findMatchInObj(kw.rootViewController);
-        LOG(@"Match: ivar search=%@", matchVC?@"FOUND":@"nil");
-        if(matchVC){
+        LOG(@"Match: ivar=%@", matchVC?@"FOUND":@"nil");
+
+        if(!matchVC){
+            // fallback: 创建并 present VC
+            Class mc=objc_getClass("HZRandomMatchViewController"); if(!mc)return;
+            matchVC=((id(*)(Class,SEL))objc_msgSend)([mc class],@selector(alloc));
+            matchVC=((id(*)(id,SEL))objc_msgSend)(matchVC,@selector(init));
+            if(!matchVC)return;
+            id cur=kw.rootViewController; while(1){id p=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(p){cur=p;continue;} break;}
+            ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(cur,@selector(presentViewController:animated:completion:),matchVC,NO,nil);
+            LOG(@"Match: VC presented");
+        }
+
+        // 等页面加载完，只调 buttonActionWithModel
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             id m=((id(*)(id,SEL))objc_msgSend)(matchVC,@selector(model));
             SEL bs=NSSelectorFromString(@"buttonActionWithModel:");
-            if([matchVC respondsToSelector:bs]){((void(*)(id,SEL,id))objc_msgSend)(matchVC,bs,m);LOG(@"Match: buttonActionWithModel model=%@",m?@"yes":@"nil");}
-            SEL rs=NSSelectorFromString(@"requestData");
-            if([matchVC respondsToSelector:rs]){((void(*)(id,SEL))objc_msgSend)(matchVC,rs);LOG(@"Match: requestData");}
-            _lastMatch=[[NSDate date] timeIntervalSince1970];
-        }
+            if([matchVC respondsToSelector:bs]){((void(*)(id,SEL,id))objc_msgSend)(matchVC,bs,m);LOG(@"Match: called model=%@",m?@"yes":@"nil");}
+        });
+        _lastMatch=[[NSDate date] timeIntervalSince1970];
     }@catch(NSException *e){LOG(@"Match crash: %@",e);}
 }
 
