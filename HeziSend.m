@@ -39,9 +39,13 @@ static void hzLog(NSString *msg) {
 // ==================== 全局状态 ====================
 static BOOL           _sending    = NO;
 static BOOL           _polling    = YES;
+static BOOL           _matching   = NO;
 static NSTimeInterval _lastSend   = 0;
+static NSTimeInterval _lastMatch  = 0;
 static UIButton      *_btn        = nil;
 static UILabel       *_btnLabel   = nil;
+static UIButton      *_matchBtn   = nil;
+static UILabel       *_matchLabel = nil;
 static NSInteger      _totalUsers = 0;
 static NSInteger      _sentCount  = 0;
 static NSString      *_deviceNum  = nil;  // shebeihao.txt 内容
@@ -297,7 +301,36 @@ static void makeButton(void) {
         [_btn addSubview:_btnLabel];
 
         [kw addSubview:_btn];
-        LOG(@"Button created at (%.0f,%.0f) size=%.0f", bx, by, bs);
+        LOG(@"Send button at (%.0f,%.0f)", bx, by);
+
+        // ── 匹配按钮 (蓝色，发送按钮下方) ──
+        CGFloat mby = by + bs + 10;
+        _matchBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        _matchBtn.frame = CGRectMake(bx, mby, bs, bs);
+        _matchBtn.backgroundColor = [[UIColor colorWithRed:0.1 green:0.4 blue:0.9 alpha:1] colorWithAlphaComponent:0.92];
+        _matchBtn.layer.cornerRadius = bs / 2;
+        _matchBtn.clipsToBounds = YES;
+        _matchBtn.layer.borderWidth = 2;
+        _matchBtn.layer.borderColor = [UIColor whiteColor].CGColor;
+        static id matchTarget = nil;
+        if (!matchTarget) {
+            Class helper = objc_allocateClassPair([NSObject class], "HZMatchHelper", 0);
+            class_addMethod(helper, sel_registerName("onMatchTap"), (IMP)onMatchTap, "v@:@");
+            objc_registerClassPair(helper);
+            matchTarget = [[helper alloc] init];
+        }
+        [_matchBtn addTarget:matchTarget action:sel_registerName("onMatchTap") forControlEvents:UIControlEventTouchUpInside];
+
+        _matchLabel = [[UILabel alloc] initWithFrame:CGRectMake(2, 8, bs-4, bs-16)];
+        _matchLabel.text = labelText(@"匹配");
+        _matchLabel.numberOfLines = 2;
+        _matchLabel.textAlignment = NSTextAlignmentCenter;
+        _matchLabel.font = [UIFont boldSystemFontOfSize:10];
+        _matchLabel.textColor = [UIColor whiteColor];
+        _matchLabel.userInteractionEnabled = NO;
+        [_matchBtn addSubview:_matchLabel];
+        [kw addSubview:_matchBtn];
+        LOG(@"Match button at (%.0f,%.0f)", bx, mby);
 
         // 保持按钮在最前 & 监听窗口变化
         [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *t) {
@@ -306,8 +339,109 @@ static void makeButton(void) {
                 [_btn removeFromSuperview];
                 [kw2 addSubview:_btn];
             }
-            if (kw2) [kw2 bringSubviewToFront:_btn];
+            if (kw2 && _matchBtn.superview != kw2) {
+                [_matchBtn removeFromSuperview];
+                [kw2 addSubview:_matchBtn];
+            }
+            if (kw2) {
+                [kw2 bringSubviewToFront:_btn];
+                [kw2 bringSubviewToFront:_matchBtn];
+            }
         }];
+    });
+}
+
+// ==================== 在线匹配 ====================
+static void doMatch(void) {
+    Class matchCls = objc_getClass("HZRandomMatchViewController");
+    if (!matchCls) { toast(@"匹配类不存在"); return; }
+
+    // 找当前 VC 实例
+    UIWindow *kw = keyWin();
+    if (!kw) return;
+    __block id matchVC = nil;
+    void (^find)(id) = nil;
+    find = ^(id vc) {
+        if (!vc || matchVC) return;
+        if ([vc isKindOfClass:matchCls]) { matchVC = vc; return; }
+        id pres = ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("presentedViewController"));
+        if (pres) find(pres);
+        if ([vc respondsToSelector:sel_registerName("childViewControllers")]) {
+            for (id child in ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("childViewControllers"))) {
+                find(child);
+            }
+        }
+    };
+    find(kw.rootViewController);
+
+    if (!matchVC) {
+        // 不在匹配页面，尝试发送进入匹配页的通知或直接创建
+        id newVC = ((id(*)(Class,SEL))objc_msgSend)([matchCls class], sel_registerName("alloc"));
+        newVC = ((id(*)(id,SEL))objc_msgSend)(newVC, sel_registerName("init"));
+        if (!newVC) { toast(@"无法创建匹配页"); return; }
+        // push 或 present
+        matchVC = newVC;
+    }
+
+    // 尝试调用可能的匹配方法
+    SEL matchSels[] = {
+        sel_registerName("startMatch"),
+        sel_registerName("startOnlineMatch"),
+        sel_registerName("startRandomMatch"),
+        sel_registerName("startMatching"),
+        sel_registerName("beginMatch"),
+        sel_registerName("start"),
+        sel_registerName("startLink"),
+        sel_registerName("connect"),
+        sel_registerName("enter"),
+        sel_registerName("join"),
+    };
+    int n = sizeof(matchSels) / sizeof(matchSels[0]);
+    BOOL called = NO;
+    for (int i = 0; i < n; i++) {
+        if ([matchVC respondsToSelector:matchSels[i]]) {
+            ((void(*)(id,SEL))objc_msgSend)(matchVC, matchSels[i]);
+            called = YES;
+            LOG(@"Match called: startMatch #%d", i);
+            break;
+        }
+    }
+    if (called) {
+        toast(@"匹配已触发");
+        _lastMatch = [[NSDate date] timeIntervalSince1970];
+    } else {
+        toast(@"未找到匹配方法");
+    }
+}
+
+static void startAutoMatch(void) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        while (YES) {
+            sleep(8);
+            if (!_matching) continue;
+            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+            if (now - _lastMatch < 10) continue; // 10秒冷却
+            dispatch_async(dispatch_get_main_queue(), ^{
+                doMatch();
+            });
+        }
+    });
+}
+
+// ==================== 匹配按钮 ====================
+static void onMatchTap(id self, SEL _cmd) {
+    _matching = !_matching;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (_matching) {
+            _matchBtn.backgroundColor = [[UIColor colorWithRed:0.9 green:0.3 blue:0.1 alpha:1] colorWithAlphaComponent:0.92];
+            _matchLabel.text = @"匹配\n中";
+            toast(@"自动匹配已开启");
+            doMatch(); // 立即触发一次
+        } else {
+            _matchBtn.backgroundColor = [[UIColor colorWithRed:0.1 green:0.4 blue:0.9 alpha:1] colorWithAlphaComponent:0.92];
+            _matchLabel.text = labelText(@"匹配");
+            toast(@"自动匹配已关闭");
+        }
     });
 }
 
@@ -319,6 +453,7 @@ static void HZInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         makeButton();
         startPolling();
+        startAutoMatch();
         LOG(@"HeziSend ready — polling a1.php every 3s");
         toast(@"赫兹群发已就绪");
     });
