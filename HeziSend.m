@@ -59,9 +59,7 @@ static void sendHZHTTP(NSString *url){
                 if(!uid){id data=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"data");
                     if(data)uid=((id(*)(id,SEL,id))objc_msgSend)(data,sel_registerName("objectForKey:"),@"userid");}
                 if(uid){NSString *sid=[uid description];if(sid.length>3&&![sid isEqualToString:@"1"]){
-                    dispatch_async(dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");}); \
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");}); \
-                    LOG(@"MATCHED -> %@",sid);
+                    dispatch_async(dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");});LOG(@"MATCHED->%@",sid);
                 } else {
                     // 没匹配到人，立即重试
                     if(_matching)dispatch_async(dispatch_get_main_queue(),^{doMatch();});
