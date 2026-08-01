@@ -10,7 +10,6 @@ static void hzLog(NSString *msg) { NSLog(@"%@", msg); NSString *p=[NSTemporaryDi
 
 static BOOL _sending=NO,_polling=YES,_progSwitch=NO;
 static volatile BOOL _matching=NO;
-static int _matchCount=0,_matchTarget=5;
 static NSTimeInterval _lastSend=0,_lastMatch=0;
 static UIButton *_btn; static UILabel *_btnLabel;
 static UISwitch *_matchSwitch; static UILabel *_matchLabel;
@@ -52,9 +51,7 @@ static void sendHZHTTP(NSString *url){
                     if(data)uid=((id(*)(id,SEL,id))objc_msgSend)(data,sel_registerName("objectForKey:"),@"userid");}
                 if(uid){NSString *sid=[uid description];if(sid.length>3&&![sid isEqualToString:@"1"]){
                     dispatch_async(dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");});
-                    _matchCount++;LOG(@"MATCH %d/%d -> %@",_matchCount,_matchTarget,sid);
-                    if(_matchCount>=_matchTarget){_matching=NO;}
-                    else{_matching=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{_matching=YES;doMatch();});}
+                    LOG(@"MATCHED -> %@",sid);
                 }}
             }
         } forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
@@ -78,9 +75,9 @@ static void doMatch(void) {
     _lastMatch=[[NSDate date] timeIntervalSince1970];
 }
 
-static void sendHiIfMatched(void) { if(!_matching)return; Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return; UIWindow *kw=keyWin(); if(!kw)return; id cur=kw.rootViewController, chatVC=nil; for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; } if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); _matchCount++; LOG(@"SENT hi! (%d/%d)",_matchCount,_matchTarget); if(_matchCount>=_matchTarget){_matching=NO;_progSwitch=YES;dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;});}else{_matching=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{_matching=YES;doMatch();});} } } }
+static void sendHiIfMatched(void) { if(!_matching)return; Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return; UIWindow *kw=keyWin(); if(!kw)return; id cur=kw.rootViewController, chatVC=nil; for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; } if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"SENT hi via chatVC"); } } }
 
-static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(1){ sleep(2); if(!_matching)continue; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); } }); }
+static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ int tick=0; while(1){ sleep(2); if(!_matching){tick=0;continue;} tick++; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); if(tick%4==0&&[[NSDate date] timeIntervalSince1970]-_lastMatch>=5){ dispatch_async(dispatch_get_main_queue(),^{doMatch();}); } } }); }
 
 static void onMatchToggle(id self, SEL _cmd) { if(_progSwitch)return; _matching=!_matching; dispatch_async(dispatch_get_main_queue(),^{ if(_matching)toast(@"检测中"); else toast(@"已关闭"); }); }
 
@@ -94,6 +91,4 @@ static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0
 [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
 __attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch();
-    // 自动开启匹配
-    _matching=YES; dispatch_async(dispatch_get_main_queue(),^{doMatch();});
-    LOG(@"auto-match started"); }); }
+    LOG(@"ready"); }); }
