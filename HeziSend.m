@@ -474,12 +474,6 @@ static void doMatch(void) {
         });
         _lastMatch = [[NSDate date] timeIntervalSince1970];
 
-        // 匹配后持续检测聊天页，一旦出现就发"嗨"
-        for (int delay = 4; delay <= 30; delay += 2) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                if (_matching) sendHiIfMatched();
-            });
-        }
     } @catch (NSException *e) {
         LOG(@"Match crash: %@", e);
     }
@@ -520,15 +514,20 @@ static void sendHiIfMatched(void) {
 static void startAutoMatch(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         LOG(@"Auto-match loop started");
+        int tick = 0;
         while (YES) {
-            sleep(8);
-            if (!_matching) continue;
-            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-            if (now - _lastMatch < 10) continue; // 10秒冷却
-            LOG(@"Auto-match: triggering doMatch");
-            dispatch_async(dispatch_get_main_queue(), ^{
-                doMatch();
-            });
+            sleep(2);
+            if (!_matching) { tick = 0; continue; }
+            tick++;
+            // 每 2 秒检测聊天页（持续发"嗨"）
+            dispatch_async(dispatch_get_main_queue(), ^{ sendHiIfMatched(); });
+            // 每 8 秒触发一次匹配（10秒冷却）
+            if (tick % 4 == 0) {
+                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                if (now - _lastMatch >= 10) {
+                    dispatch_async(dispatch_get_main_queue(), ^{ doMatch(); });
+                }
+            }
         }
     });
 }
