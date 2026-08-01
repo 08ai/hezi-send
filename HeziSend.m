@@ -226,6 +226,10 @@ static void doMatch(void) {
             }
         }
     }
+    // 如果从 DB/系统读到的 sessionId 太短（<20 字符），说明不是真实 cookie，用硬编码值
+    if(sessionId.length < 20) {
+        sessionId = @"599E3BBE-B9D9-4FB7-1C25-D9FA7E49CD8E"; // 从抓包拿到的 SESSIONID
+    }
     LOG(@"Match: sessionId=%@ fr=%@", sessionId?:@"NOT FOUND", fr);
 
     // 3. 发送匹配请求（用抓包得到的真实数据）
