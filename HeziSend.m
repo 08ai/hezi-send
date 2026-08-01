@@ -55,7 +55,7 @@ static id findMatchInObj(id obj) {
     if(!obj)return nil; Class mc=objc_getClass("HZRandomMatchViewController"); if(!mc)return nil;
     if([obj isKindOfClass:mc])return obj;
     unsigned int cnt=0; Ivar *ivars=class_copyIvarList([obj class],&cnt);
-    for(unsigned int i=0;i<cnt;i++){ @try{ id v=object_getIvar(obj,ivars[i]); if(v&&[v isKindOfClass:mc]){free(ivars);return v;} }@catch(NSException *e){} }
+    for(unsigned int i=0;i<cnt;i++){ const char *type=ivar_getTypeEncoding(ivars[i]); if(!type||type[0]!='@')continue; @try{ id v=object_getIvar(obj,ivars[i]); if(v&&[v isKindOfClass:mc]){free(ivars);return v;} }@catch(NSException *e){} }
     free(ivars);
     for(id child in ((id(*)(id,SEL))objc_msgSend)(obj,@selector(childViewControllers))?:@[]){ id f=findMatchInObj(child); if(f)return f; }
     id pres=((id(*)(id,SEL))objc_msgSend)(obj,@selector(presentedViewController)); if(pres){id f=findMatchInObj(pres);if(f)return f;}
