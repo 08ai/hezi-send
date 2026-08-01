@@ -53,6 +53,9 @@ static void doMatch(void) {
         @try{[config setValue:urlStr forKey:@"URLString"];}@catch(NSException *e){}
         @try{[config setValue:@"POST" forKey:@"HTTPMethod"];}@catch(NSException *e){}
         @try{[config setValue:@{@"fr":@"48051782"} forKey:@"parameters"];}@catch(NSException *e){}
+        // 设置成功/失败回调
+        @try{[config setValue:^(id resp){ LOG(@"Match HZHTTP success: %@", resp); } forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
+        @try{[config setValue:^(NSError *e){ LOG(@"Match HZHTTP fail: %@", e); } forKey:@"requestFailureBlock"];}@catch(NSException *e){}
         LOG(@"Match: config done, URLString=%@", [config valueForKey:@"URLString"]);
     }
 
