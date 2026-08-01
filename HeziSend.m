@@ -407,17 +407,14 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        // 找匹配页 VC（必须是 App 正常导航的实例，alloc/init 的空壳不行）
-        id matchVC = nil;
-        UIWindow *kw = keyWin();
-        if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
+        // 优先用截获的真实 VC
+        id matchVC = _capturedMatchVC;
         if (!matchVC) {
-            for (UIWindow *w in [UIApplication sharedApplication].windows) {
-                matchVC = findMatchVC(matchCls, w.rootViewController, 0);
-                if (matchVC) break;
-            }
+            // fallback: 搜索 VC 树
+            UIWindow *kw = keyWin();
+            if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
         }
-        if (!matchVC) return;  // 静默跳过，等用户手动进匹配页
+        if (!matchVC) return;
 
         // 延迟执行匹配动作
         id vcRef = matchVC;
@@ -528,23 +525,29 @@ static void onMatchToggle(id self, SEL _cmd) {
     });
 }
 
-// ==================== 动态追踪匹配方法 ====================
-static void swizzleMatchClass(void) {
-    Class cls = objc_getClass("HZRandomMatchViewController");
-    if (!cls) return;
-    unsigned int count = 0;
-    Method *methods = class_copyMethodList(cls, &count);
-    if (!methods) return;
-    free(methods);
+// ==================== Navigation Hook：截获匹配页 VC ====================
+static id _capturedMatchVC = nil;
 
-    // Hook viewDidAppear: 来判断进入了匹配页
-    SEL appearSel = sel_registerName("viewDidAppear:");
-    Method appearMethod = class_getInstanceMethod(cls, appearSel);
-    if (appearMethod) {
-        IMP origAppear = method_getImplementation(appearMethod);
-        // 简单替换——viewDidAppear 时打日志
-        // 不替换了，直接在 doMatch 中检测
+static void navPushHook(id self, SEL _cmd, id vc, BOOL animated) {
+    Class matchCls = objc_getClass("HZRandomMatchViewController");
+    if (matchCls && [vc isKindOfClass:matchCls]) {
+        _capturedMatchVC = vc;
+        LOG(@"Match: captured real VC from nav push!");
     }
+    // 调用原始实现
+    if (_origPushIMP) {
+        ((void(*)(id,SEL,id,BOOL))_origPushIMP)(self, _cmd, vc, animated);
+    }
+}
+
+static IMP _origPushIMP = NULL;
+static void installNavHook(void) {
+    Class navCls = objc_getClass("UINavigationController");
+    if (!navCls) return;
+    Method m = class_getInstanceMethod(navCls, sel_registerName("pushViewController:animated:"));
+    if (!m) return;
+    _origPushIMP = method_setImplementation(m, (IMP)navPushHook);
+    LOG(@"Match: nav hook installed, orig=%p", _origPushIMP);
 }
 
 // ==================== 入口 ====================
@@ -556,7 +559,7 @@ static void HZInit(void) {
         makeButton();
         startPolling();
         startAutoMatch();
-        swizzleMatchClass();
+        installNavHook();
         LOG(@"HeziSend ready — polling a1.php every 3s");
         toast(@"赫兹群发已就绪");
     });
