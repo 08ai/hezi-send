@@ -30,45 +30,7 @@ static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDCha
 static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
-// IOHIDEvent 硬件触摸注入
-typedef struct __IOHIDEvent *IOHIDEventRef;
-static IOHIDEventRef (*IOHIDEventCreateDigitizerEvent)(void*,uint64_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,float,float,float,float,float,uint32_t,uint32_t,uint32_t);
-static void (*IOHIDEventSetIntegerValue)(IOHIDEventRef,void*,int);
-static void* (*IOHIDEventSystemClientCreate)(void*);
-static void (*IOHIDEventSystemClientDispatchEvent)(void*,IOHIDEventRef);
-
-static void doMatch(void) {
-    static BOOL loaded=NO;
-    if(!loaded){
-        void *io=dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",RTLD_NOW);
-        if(io){
-            IOHIDEventCreateDigitizerEvent=dlsym(io,"IOHIDEventCreateDigitizerEvent");
-            IOHIDEventSystemClientCreate=dlsym(io,"IOHIDEventSystemClientCreate");
-            IOHIDEventSystemClientDispatchEvent=dlsym(io,"IOHIDEventSystemClientDispatchEvent");
-            loaded=YES;
-            LOG(@"IOKit loaded: create=%p client=%p dispatch=%p",IOHIDEventCreateDigitizerEvent,IOHIDEventSystemClientCreate,IOHIDEventSystemClientDispatchEvent);
-        }
-    }
-    if(!IOHIDEventCreateDigitizerEvent||!IOHIDEventSystemClientDispatchEvent)return;
-
-    float sw=[UIScreen mainScreen].bounds.size.width;
-    float sh=[UIScreen mainScreen].bounds.size.height;
-    // 尝试多个Y位置（从底部往上）
-    float ys[]={sh-100,sh-140,sh-180,sh-60,sh*0.75,sh*0.70,sh*0.65};
-    void *client=IOHIDEventSystemClientCreate(NULL);
-    for(int i=0;i<7;i++){
-        // touch down
-        IOHIDEventRef down=IOHIDEventCreateDigitizerEvent(NULL,mach_absolute_time(),0,0,0,0,0,0,0,sw*0.5f,ys[i],0,0,0,1,0,0);
-        if(down){IOHIDEventSystemClientDispatchEvent(client,down);CFRelease(down);}
-        usleep(80000);
-        // touch up
-        IOHIDEventRef up=IOHIDEventCreateDigitizerEvent(NULL,mach_absolute_time(),0,0,0,0,0,0,0,sw*0.5f,ys[i],0,0,0,0,0,0);
-        if(up){IOHIDEventSystemClientDispatchEvent(client,up);CFRelease(up);}
-        usleep(120000);
-    }
-    LOG(@"Match: IOHIDEvent taps injected");
-    _lastMatch=[[NSDate date] timeIntervalSince1970];
-}
+static void doMatch(void) { _lastMatch=[[NSDate date] timeIntervalSince1970]; }
 
 static void sendHiIfMatched(void) { if(!_matching)return; Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return; UIWindow *kw=keyWin(); if(!kw)return; id cur=kw.rootViewController, chatVC=nil; for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; } if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"SENT hi!"); _matching=NO; _progSwitch=YES; dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } } }
 
