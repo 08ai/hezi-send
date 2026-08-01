@@ -481,8 +481,27 @@ static void doMatch(void) {
 
 // 匹配成功后给用户发"嗨"
 static void sendHiIfMatched(void) {
-    LOG(@"sendHi: called, matching=%d", _matching);
     if (!_matching) return;
+
+    // 记录当前顶层 VC 类名（用于调试）
+    static NSString *_lastVCClass = nil;
+    UIWindow *kw = keyWin();
+    id topVC = kw.rootViewController;
+    while (1) {
+        id pres = ((id(*)(id,SEL))objc_msgSend)(topVC, sel_registerName("presentedViewController"));
+        if (pres) { topVC = pres; continue; }
+        SEL vs = sel_registerName("visibleViewController");
+        if ([topVC respondsToSelector:vs]) {
+            id vis = ((id(*)(id,SEL))objc_msgSend)(topVC, vs);
+            if (vis) topVC = vis;
+        }
+        break;
+    }
+    NSString *cn = NSStringFromClass([topVC class]);
+    if (![cn isEqualToString:_lastVCClass]) {
+        _lastVCClass = cn;
+        LOG(@"sendHi: top VC = %@", cn);
+    }
 
     // 搜索所有可能的聊天 VC 类
     NSArray *chatClasses = @[@"MDChatSingleViewController", @"HZMessageViewController"];
