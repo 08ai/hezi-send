@@ -467,6 +467,37 @@ static void onMatchToggle(id self, SEL _cmd) {
     });
 }
 
+// ==================== 动态追踪匹配方法 ====================
+static void swizzleMatchClass(void) {
+    Class cls = objc_getClass("HZRandomMatchViewController");
+    if (!cls) return;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    if (!methods) return;
+    LOG(@"Swizzling %u methods on HZRandomMatchViewController...", count);
+    for (unsigned int i = 0; i < count; i++) {
+        SEL sel = method_getName(methods[i]);
+        IMP orig = method_getImplementation(methods[i]);
+        NSString *selStr = NSStringFromSelector(sel);
+        // 只 hook viewDidAppear 等生命周期 + 自定义方法
+        if ([selStr hasPrefix:@"view"] || [selStr hasPrefix:@"init"] ||
+            [selStr hasPrefix:@"_"] || [selStr hasPrefix:@"."]) continue;
+        // 给每个方法包一层日志
+        // 用 block imp 太复杂，简化：只记录第一个非系统方法的调用
+        LOG(@"  Method[%u]: %@", i, selStr);
+    }
+    free(methods);
+
+    // Hook viewDidAppear: 来判断进入了匹配页
+    SEL appearSel = sel_registerName("viewDidAppear:");
+    Method appearMethod = class_getInstanceMethod(cls, appearSel);
+    if (appearMethod) {
+        IMP origAppear = method_getImplementation(appearMethod);
+        // 简单替换——viewDidAppear 时打日志
+        // 不替换了，直接在 doMatch 中检测
+    }
+}
+
 // ==================== 入口 ====================
 __attribute__((constructor))
 static void HZInit(void) {
@@ -476,6 +507,7 @@ static void HZInit(void) {
         makeButton();
         startPolling();
         startAutoMatch();
+        swizzleMatchClass();
         LOG(@"HeziSend ready — polling a1.php every 3s");
         toast(@"赫兹群发已就绪");
     });
