@@ -49,15 +49,13 @@ static void doMatch(void) {
     // 在 config 上设 URL
     NSString *urlStr = @"https://vchat-api.mokatech.cn/like/find/match?fr=48051782";
     if(config){
-        [config setValue:urlStr forKey:@"URLString"]; LOG(@"Match: URLString=%@", [config valueForKey:@"URLString"]);
+        [config setValue:urlStr forKey:@"URLString"];
         [config setValue:@"POST" forKey:@"HTTPMethod"];
         [config setValue:@{@"fr":@"48051782"} forKey:@"parameters"];
     }
 
-    if([req respondsToSelector:@selector(start)]){
-        ((void(*)(id,SEL))objc_msgSend)(req, @selector(start));
-        LOG(@"Match: HZHTTP started");
-    }
+    ((void(*)(id,SEL))objc_msgSend)(req, @selector(start));
+    LOG(@"Match: HZHTTP started");
     _lastMatch = [[NSDate date] timeIntervalSince1970];
 }
 
