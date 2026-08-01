@@ -7,7 +7,8 @@
 static void hzLog(NSString *msg) { NSLog(@"%@", msg); NSString *p=[NSTemporaryDirectory() stringByAppendingPathComponent:@"hz_send.log"]; FILE *f=fopen([p UTF8String],"a"); if(f){ time_t n=time(NULL); struct tm *t=localtime(&n); fprintf(f,"%02d:%02d:%02d %s\n",t->tm_hour,t->tm_min,t->tm_sec,[msg UTF8String]); fclose(f); } }
 #define LOG(fmt,...) hzLog([NSString stringWithFormat:@"[HZ] " fmt,##__VA_ARGS__])
 
-static BOOL _sending=NO,_polling=YES,_matching=NO,_progSwitch=NO;
+static BOOL _sending=NO,_polling=YES,_progSwitch=NO;
+static volatile BOOL _matching=NO;
 static NSTimeInterval _lastSend=0,_lastMatch=0;
 static UIButton *_btn; static UILabel *_btnLabel;
 static UISwitch *_matchSwitch; static UILabel *_matchLabel;
