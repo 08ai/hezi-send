@@ -367,34 +367,40 @@ static void makeButton(void) {
 // ==================== 在线匹配 ====================
 static void sendHiIfMatched(void);
 
-// 通过 PhotonIMClient 发匹配请求（和发消息一样走 Photon 协议）
 static void doMatch(void) {
     @try {
-        Class clientCls = objc_getClass("PhotonIMClient");
-        Class msgCls = objc_getClass("PhotonIMMessage");
-        if (!clientCls || !msgCls) { LOG(@"Photon classes missing"); return; }
+        Class matchCls = objc_getClass("HZRandomMatchViewController");
+        if (!matchCls) return;
 
-        id client = ((id(*)(Class,SEL))objc_msgSend)(clientCls, sel_registerName("sharedClient"));
-        if (!client) { LOG(@"sharedClient nil"); return; }
+        // 找 VC 实例
+        UIWindow *kw = keyWin();
+        if (!kw) return;
+        id vc = kw.rootViewController;
+        id matchVC = nil;
+        for (int i = 0; i < 20 && vc && !matchVC; i++) {
+            if ([vc isKindOfClass:matchCls]) { matchVC = vc; break; }
+            SEL ps = sel_registerName("presentedViewController");
+            id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
+            if (pres) { vc = pres; continue; }
+            break;
+        }
+        if (!matchVC) { toast(@"请先进匹配页"); return; }
 
-        // PhotonIMMessage.commonMessageWithFrid:toid:messageType:chatType:
-        // 尝试不同的 messageType 触发匹配（1=文字, 可能 100+=匹配）
-        SEL msgSel = sel_registerName("commonMessageWithFrid:toid:messageType:chatType:");
-        if (![msgCls respondsToSelector:msgSel]) { LOG(@"commonMessageWithFrid not found"); return; }
-
-        // 用特殊消息类型触发匹配（尝试 100, 200, 1000）
-        int types[] = {100, 200, 1000};
-        NSString *myId = @"0"; // Photon 会自动填
-
-        for (int i = 0; i < 3; i++) {
-            id msg = ((id(*)(Class,SEL,id,id,NSInteger,NSInteger))objc_msgSend)(
-                msgCls, msgSel, myId, myId, types[i], 2); // chatType=2 (可能是匹配)
-            if (msg) {
-                SEL sendSel = sel_registerName("sendMessage:completion:");
-                if ([client respondsToSelector:sendSel]) {
-                    ((void(*)(id,SEL,id,id))objc_msgSend)(client, sendSel, msg, nil);
-                    LOG(@"Match: sent type=%d", types[i]);
-                }
+        // 获取 model
+        id model = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("model"));
+        if (model) {
+            // 调用 buttonActionWithModel:
+            SEL btnSel = sel_registerName("buttonActionWithModel:");
+            if ([matchVC respondsToSelector:btnSel]) {
+                ((void(*)(id,SEL,id))objc_msgSend)(matchVC, btnSel, model);
+                LOG(@"Match: buttonActionWithModel called");
+            }
+        } else {
+            // 没有 model，尝试直接调用 requestData
+            SEL reqSel = sel_registerName("requestData");
+            if ([matchVC respondsToSelector:reqSel]) {
+                ((void(*)(id,SEL))objc_msgSend)(matchVC, reqSel);
+                LOG(@"Match: requestData called");
             }
         }
         _lastMatch = [[NSDate date] timeIntervalSince1970];
