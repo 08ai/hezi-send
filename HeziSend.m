@@ -365,86 +365,92 @@ static void makeButton(void) {
 }
 
 // ==================== 在线匹配 ====================
-// 递归找按钮：标题包含关键词
-static UIButton* findMatchButton(UIView *view) {
-    if (!view) return nil;
-    // 先看自己
+// 递归找按钮（限制深度防崩溃）
+static UIButton* findMatchButtonDepth(UIView *view, int depth) {
+    if (!view || depth > 15) return nil;
     if ([view isKindOfClass:[UIButton class]]) {
         UIButton *btn = (UIButton *)view;
-        NSString *title = [btn currentTitle];
-        if (title) {
-            NSRange r = [title rangeOfString:@"匹配" options:NSCaseInsensitiveSearch];
-            if (r.location != NSNotFound) return btn;
+        @try {
+            NSString *title = [btn currentTitle];
+            if (title && [title rangeOfString:@"匹配" options:NSCaseInsensitiveSearch].location != NSNotFound)
+                return btn;
+        } @catch (NSException *e) {}
+    }
+    @try {
+        NSArray *subs = view.subviews;
+        for (UIView *sub in subs) {
+            UIButton *found = findMatchButtonDepth(sub, depth + 1);
+            if (found) return found;
         }
-    }
-    // 递归子视图
-    for (UIView *sub in view.subviews) {
-        UIButton *found = findMatchButton(sub);
-        if (found) return found;
-    }
+    } @catch (NSException *e) {}
     return nil;
 }
 
 static void doMatch(void) {
-    UIWindow *kw = keyWin();
-    if (!kw) return;
+    @try {
+        UIWindow *kw = keyWin();
+        if (!kw) return;
 
-    // 方式1：在当前页面找匹配按钮直接点击
-    UIButton *btn = findMatchButton(kw);
-    if (btn && btn.enabled && !btn.hidden) {
-        LOG(@"Match: found button, sending tap");
-        [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-        _lastMatch = [[NSDate date] timeIntervalSince1970];
-        return;
-    }
-
-    // 方式2：找 HZRandomMatchViewController 并尝试调方法
-    Class matchCls = objc_getClass("HZRandomMatchViewController");
-    if (!matchCls) { toast(@"匹配页面未找到"); return; }
-
-    // 遍历 VC 找实例
-    __block id matchVC = nil;
-    void (^findVC)(id) = nil;
-    findVC = ^(id vc) {
-        if (!vc || matchVC) return;
-        if ([vc isKindOfClass:matchCls]) { matchVC = vc; return; }
-        id pres = ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("presentedViewController"));
-        if (pres) findVC(pres);
-        if ([vc respondsToSelector:sel_registerName("childViewControllers")]) {
-            for (id child in ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("childViewControllers")))
-                findVC(child);
-        }
-    };
-    findVC(kw.rootViewController);
-
-    if (!matchVC) { toast(@"请先进入匹配页"); return; }
-
-    // 在 VC 的 view 里找匹配按钮
-    UIView *vcView = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("view"));
-    btn = findMatchButton(vcView);
-    if (btn && btn.enabled && !btn.hidden) {
-        LOG(@"Match: found button in VC");
-        [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-        _lastMatch = [[NSDate date] timeIntervalSince1970];
-        return;
-    }
-
-    // 方式3：尝试调用常见方法
-    SEL trySels[] = {
-        sel_registerName("startMatch"),
-        sel_registerName("startLink"),
-        sel_registerName("connect"),
-        sel_registerName("start"),
-    };
-    for (int i = 0; i < 4; i++) {
-        if ([matchVC respondsToSelector:trySels[i]]) {
-            ((void(*)(id,SEL))objc_msgSend)(matchVC, trySels[i]);
+        // 方式1：在屏幕上找含"匹配"的按钮直接点
+        UIButton *btn = findMatchButtonDepth(kw, 0);
+        if (btn && btn.enabled && !btn.hidden) {
+            LOG(@"Match: tapping button");
+            [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
             _lastMatch = [[NSDate date] timeIntervalSince1970];
-            LOG(@"Match: called selector #%d", i);
             return;
         }
+
+        // 方式2：找 HZRandomMatchViewController
+        Class matchCls = objc_getClass("HZRandomMatchViewController");
+        if (!matchCls) return;
+
+        // 简单遍历 VC 链（不用递归 block）
+        id vc = kw.rootViewController;
+        id matchVC = nil;
+        for (int i = 0; i < 20 && vc && !matchVC; i++) {
+            if ([vc isKindOfClass:matchCls]) { matchVC = vc; break; }
+            // 先看 presented
+            SEL ps = sel_registerName("presentedViewController");
+            id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
+            if (pres) { vc = pres; continue; }
+            // 再看 childViewControllers
+            SEL cs = sel_registerName("childViewControllers");
+            if ([vc respondsToSelector:cs]) {
+                NSArray *children = ((id(*)(id,SEL))objc_msgSend)(vc, cs);
+                if (children.count > 0) { vc = children.lastObject; continue; }
+            }
+            break;
+        }
+
+        if (!matchVC) return;
+
+        // 在 VC 的 view 里找匹配按钮
+        UIView *vcView = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("view"));
+        btn = findMatchButtonDepth(vcView, 0);
+        if (btn && btn.enabled && !btn.hidden) {
+            LOG(@"Match: tapping VC button");
+            [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+            _lastMatch = [[NSDate date] timeIntervalSince1970];
+            return;
+        }
+
+        // 方式3：尝试调 startMatch
+        SEL s = sel_registerName("startMatch");
+        if ([matchVC respondsToSelector:s]) {
+            ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
+            _lastMatch = [[NSDate date] timeIntervalSince1970];
+            LOG(@"Match: startMatch called");
+            return;
+        }
+        s = sel_registerName("startLink");
+        if ([matchVC respondsToSelector:s]) {
+            ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
+            _lastMatch = [[NSDate date] timeIntervalSince1970];
+            LOG(@"Match: startLink called");
+        }
+    } @catch (NSException *e) {
+        LOG(@"Match crash: %@", e);
     }
-    toast(@"未找到匹配按钮");
 }
 
 static void startAutoMatch(void) {
