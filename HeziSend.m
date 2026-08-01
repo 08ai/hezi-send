@@ -76,10 +76,50 @@ static id findMatchInObj(id obj) {
     return nil;
 }
 
+// 递归找按钮并点击
+static BOOL tapAnyButton(UIView *view) {
+    if(!view)return NO;
+    if([view isKindOfClass:[UIButton class]]){
+        UIButton *b=(UIButton*)view;
+        if(b.enabled&&!b.hidden&&b.alpha>0.5){
+            [b sendActionsForControlEvents:UIControlEventTouchUpInside];
+            LOG(@"Match: tapped button '%@'",[b currentTitle]?:@"(no title)");
+            return YES;
+        }
+    }
+    for(UIView *sub in view.subviews){ if(tapAnyButton(sub))return YES; }
+    return NO;
+}
+
 static void doMatch(void) {
-    // 开关只控制 sendHi 监听，匹配由用户手动触发
-    LOG(@"doMatch: waiting for manual match...");
-    _lastMatch=[[NSDate date] timeIntervalSince1970];
+    LOG(@"doMatch()");
+    @try {
+        // 创建并 present 匹配 VC
+        Class mc=objc_getClass("HZRandomMatchViewController"); if(!mc)return;
+        id vc=((id(*)(Class,SEL))objc_msgSend)([mc class],@selector(alloc));
+        vc=((id(*)(id,SEL))objc_msgSend)(vc,@selector(init));
+        if(!vc)return;
+        UIWindow *kw=keyWin(); if(!kw)return;
+        id cur=kw.rootViewController;
+        while(1){id p=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController));if(p){cur=p;continue;}break;}
+        ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(cur,@selector(presentViewController:animated:completion:),vc,NO,nil);
+        LOG(@"Match: VC presented");
+
+        // 延迟后先调方法，再找按钮点击
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1.5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+            // 调 requestData
+            SEL rs=NSSelectorFromString(@"requestData");
+            if([vc respondsToSelector:rs]){((void(*)(id,SEL))objc_msgSend)(vc,rs);LOG(@"Match: requestData");}
+            // 调 buttonActionWithModel
+            id m=((id(*)(id,SEL))objc_msgSend)(vc,@selector(model));
+            SEL bs=NSSelectorFromString(@"buttonActionWithModel:");
+            if([vc respondsToSelector:bs]){((void(*)(id,SEL,id))objc_msgSend)(vc,bs,m);LOG(@"Match: buttonActionWithModel");}
+            // 遍历找按钮点击
+            id view=((id(*)(id,SEL))objc_msgSend)(vc,@selector(view));
+            if(!tapAnyButton(view))LOG(@"Match: no button found");
+        });
+        _lastMatch=[[NSDate date] timeIntervalSince1970];
+    }@catch(NSException *e){LOG(@"Match crash: %@",e);}
 }
 
 static void sendHiIfMatched(void) {
