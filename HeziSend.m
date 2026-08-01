@@ -291,35 +291,19 @@ static void doMatch(void) {
 
         // 等页面加载后触发匹配
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
-            LOG(@"Match: model=%@", model ? @"exists" : @"nil");
-
-            // 先调 requestData（不需要 model）
+            // 只调匹配相关方法（不调 didTapInviteView）
             SEL reqSel = NSSelectorFromString(@"requestData");
             if ([vc respondsToSelector:reqSel]) {
                 ((void(*)(id,SEL))objc_msgSend)(vc, reqSel);
                 LOG(@"Match: requestData called");
             }
 
-            // 调 buttonActionWithModel（用 model）
+            // 尝试获取 model，即使 nil 也调 buttonActionWithModel
+            id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
             SEL btnSel = NSSelectorFromString(@"buttonActionWithModel:");
-            if (model && [vc respondsToSelector:btnSel]) {
-                ((void(*)(id,SEL,id))objc_msgSend)(vc, btnSel, model);
-                LOG(@"Match: buttonActionWithModel called");
-            }
-
-            // 调 showVoiceMatchWithGoto
-            SEL svSel = NSSelectorFromString(@"showVoiceMatchWithGoto:");
-            if ([vc respondsToSelector:svSel]) {
-                ((void(*)(id,SEL,id))objc_msgSend)(vc, svSel, vc);
-                LOG(@"Match: showVoiceMatchWithGoto called");
-            }
-
-            // 调 didTapInviteView
-            SEL diSel = NSSelectorFromString(@"didTapInviteView");
-            if ([vc respondsToSelector:diSel]) {
-                ((void(*)(id,SEL))objc_msgSend)(vc, diSel);
-                LOG(@"Match: didTapInviteView called");
+            if ([vc respondsToSelector:btnSel]) {
+                ((void(*)(id,SEL,id))objc_msgSend)(vc, btnSel, model); // model 可能 nil
+                LOG(@"Match: buttonActionWithModel called model=%@", model?@"yes":@"nil");
             }
         });
 
