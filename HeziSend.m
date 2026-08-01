@@ -44,8 +44,8 @@ static NSTimeInterval _lastSend   = 0;
 static NSTimeInterval _lastMatch  = 0;
 static UIButton      *_btn        = nil;
 static UILabel       *_btnLabel   = nil;
-static UIButton      *_matchBtn   = nil;
-static UILabel       *_matchLabel = nil;
+static UISwitch      *_matchSwitch = nil;
+static UILabel       *_matchLabel  = nil;
 static NSInteger      _totalUsers = 0;
 static NSInteger      _sentCount  = 0;
 static NSString      *_deviceNum  = nil;  // shebeihao.txt 内容
@@ -306,34 +306,42 @@ static void makeButton(void) {
         [kw addSubview:_btn];
         LOG(@"Send button at (%.0f,%.0f)", bx, by);
 
-        // ── 匹配按钮 (蓝色，发送按钮上方) ──
+        // ── 匹配开关 (绿色按钮上方) ──
         CGFloat mby = by - bs - 10;
-        _matchBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        _matchBtn.frame = CGRectMake(bx, mby, bs, bs);
-        _matchBtn.backgroundColor = [[UIColor colorWithRed:0.1 green:0.4 blue:0.9 alpha:1] colorWithAlphaComponent:0.92];
-        _matchBtn.layer.cornerRadius = bs / 2;
-        _matchBtn.clipsToBounds = YES;
-        _matchBtn.layer.borderWidth = 2;
-        _matchBtn.layer.borderColor = [UIColor whiteColor].CGColor;
+        _matchLabel = [[UILabel alloc] initWithFrame:CGRectMake(bx - 40, mby, 35, 33)];
+        _matchLabel.text = labelText(@"匹配");
+        _matchLabel.font = [UIFont boldSystemFontOfSize:12];
+        _matchLabel.textColor = [UIColor whiteColor];
+        _matchLabel.textAlignment = NSTextAlignmentRight;
+        _matchLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        _matchLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        _matchLabel.layer.shadowRadius = 2;
+        _matchLabel.layer.shadowOpacity = 0.6;
+        [kw addSubview:_matchLabel];
+
+        _matchSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(bx - 5, mby - 4, 51, 31)];
+        _matchSwitch.onTintColor = [UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1];
+        [_matchSwitch setOn:NO];
+        [kw addSubview:_matchSwitch];
+        // 添加事件
+        [_matchSwitch addTarget:NSClassFromString(@"NSObject") action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
+        // 用 helper 类处理
         static id matchTarget = nil;
         if (!matchTarget) {
             Class helper = objc_allocateClassPair([NSObject class], "HZMatchHelper", 0);
-            class_addMethod(helper, sel_registerName("onMatchTap"), (IMP)onMatchTap, "v@:@");
+            class_addMethod(helper, sel_registerName("onMatchToggle:"), (IMP)onMatchToggle, "v@:@");
             objc_registerClassPair(helper);
             matchTarget = [[helper alloc] init];
         }
-        [_matchBtn addTarget:matchTarget action:sel_registerName("onMatchTap") forControlEvents:UIControlEventTouchUpInside];
+        [_matchSwitch addTarget:matchTarget action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
+        LOG(@"Match switch at (%.0f,%.0f)", bx - 50, mby);
 
-        _matchLabel = [[UILabel alloc] initWithFrame:CGRectMake(2, 8, bs-4, bs-16)];
-        _matchLabel.text = labelText(@"匹配");
-        _matchLabel.numberOfLines = 2;
-        _matchLabel.textAlignment = NSTextAlignmentCenter;
-        _matchLabel.font = [UIFont boldSystemFontOfSize:10];
-        _matchLabel.textColor = [UIColor whiteColor];
-        _matchLabel.userInteractionEnabled = NO;
-        [_matchBtn addSubview:_matchLabel];
-        [kw addSubview:_matchBtn];
-        LOG(@"Match button at (%.0f,%.0f)", bx, mby);
+        // Switch 状态同步定时器
+        [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+            if (_matchSwitch.isOn != _matching) {
+                [_matchSwitch setOn:_matching animated:YES];
+            }
+        }];
 
         // 保持按钮在最前 & 监听窗口变化
         [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *t) {
@@ -342,13 +350,18 @@ static void makeButton(void) {
                 [_btn removeFromSuperview];
                 [kw2 addSubview:_btn];
             }
-            if (kw2 && _matchBtn.superview != kw2) {
-                [_matchBtn removeFromSuperview];
-                [kw2 addSubview:_matchBtn];
+            if (kw2 && _matchSwitch.superview != kw2) {
+                [_matchSwitch removeFromSuperview];
+                [kw2 addSubview:_matchSwitch];
+            }
+            if (kw2 && _matchLabel.superview != kw2) {
+                [_matchLabel removeFromSuperview];
+                [kw2 addSubview:_matchLabel];
             }
             if (kw2) {
                 [kw2 bringSubviewToFront:_btn];
-                [kw2 bringSubviewToFront:_matchBtn];
+                [kw2 bringSubviewToFront:_matchLabel];
+                [kw2 bringSubviewToFront:_matchSwitch];
             }
         }];
     });
@@ -431,18 +444,14 @@ static void startAutoMatch(void) {
     });
 }
 
-// ==================== 匹配按钮 ====================
-static void onMatchTap(id self, SEL _cmd) {
+// ==================== 匹配开关 ====================
+static void onMatchToggle(id self, SEL _cmd) {
     _matching = !_matching;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (_matching) {
-            _matchBtn.backgroundColor = [[UIColor colorWithRed:0.9 green:0.3 blue:0.1 alpha:1] colorWithAlphaComponent:0.92];
-            _matchLabel.text = @"匹配\n中";
             toast(@"自动匹配已开启");
-            doMatch(); // 立即触发一次
+            doMatch();
         } else {
-            _matchBtn.backgroundColor = [[UIColor colorWithRed:0.1 green:0.4 blue:0.9 alpha:1] colorWithAlphaComponent:0.92];
-            _matchLabel.text = labelText(@"匹配");
             toast(@"自动匹配已关闭");
         }
     });
