@@ -390,6 +390,7 @@ static id findMatchVC(Class cls, id root) {
 }
 
 static void doMatch(void) {
+    LOG(@"doMatch() called");
     @try {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
@@ -466,11 +467,13 @@ static void sendHiIfMatched(void) {
 
 static void startAutoMatch(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        LOG(@"Auto-match loop started");
         while (YES) {
             sleep(8);
             if (!_matching) continue;
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
             if (now - _lastMatch < 10) continue; // 10秒冷却
+            LOG(@"Auto-match: triggering doMatch");
             dispatch_async(dispatch_get_main_queue(), ^{
                 doMatch();
             });
@@ -481,6 +484,7 @@ static void startAutoMatch(void) {
 // ==================== 匹配开关 ====================
 static void onMatchToggle(id self, SEL _cmd) {
     _matching = !_matching;
+    LOG(@"Match toggle: %@", _matching ? @"ON" : @"OFF");
     dispatch_async(dispatch_get_main_queue(), ^{
         if (_matching) {
             toast(@"自动匹配已开启");
