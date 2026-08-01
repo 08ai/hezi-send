@@ -266,6 +266,9 @@ static void startPolling(void) {
     });
 }
 
+// 前置声明
+static void onMatchTap(id self, SEL _cmd);
+
 // ==================== UI 按钮 ====================
 static void makeButton(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
