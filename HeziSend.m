@@ -409,14 +409,22 @@ static void doMatch(void) {
 
         // 搜所有窗口找匹配页 VC
         id matchVC = nil;
+        LOG(@"Match: searching windows...");
         UIWindow *kw = keyWin();
-        if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
-        if (!matchVC) {
-            for (UIWindow *w in [UIApplication sharedApplication].windows)
-                if ((matchVC = findMatchVC(matchCls, w.rootViewController, 0))) break;
+        if (kw) {
+            LOG(@"Match: keyWin OK, rootVC=%@", kw.rootViewController);
+            matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
         }
-        LOG(@"Match VC: %@", matchVC ? @"FOUND" : @"NOT FOUND");
-        if (!matchVC) { return; }
+        LOG(@"Match: keyWin result=%@", matchVC ? @"FOUND" : @"nil");
+        if (!matchVC) {
+            NSArray *wins = [UIApplication sharedApplication].windows;
+            LOG(@"Match: scanning %lu windows", (unsigned long)wins.count);
+            for (UIWindow *w in wins) {
+                matchVC = findMatchVC(matchCls, w.rootViewController, 0);
+                if (matchVC) { LOG(@"Match: FOUND in window"); break; }
+            }
+        }
+        if (!matchVC) { LOG(@"Match: NOT FOUND in any window"); return; }
 
         // 获取 model
         id model = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("model"));
