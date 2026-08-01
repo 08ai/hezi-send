@@ -135,7 +135,45 @@ static BOOL tapAnyButton(UIView *view) {
     return NO;
 }
 
-static void doMatch(void) { LOG(@"doMatch: manual trigger only"); _lastMatch=[[NSDate date] timeIntervalSince1970]; }
+// 从 Flutter accessibility 树中找按钮并激活
+static BOOL activateFlutterButton(NSString *label, UIView *view) {
+    if(!view)return NO;
+    // 检查 Flutter accessibility 子元素
+    if([view respondsToSelector:@selector(accessibilityElementCount)]){
+        NSInteger cnt=[view accessibilityElementCount];
+        for(NSInteger i=0;i<cnt;i++){
+            id child=[view accessibilityElementAtIndex:i];
+            if([child isAccessibilityElement]){
+                NSString *l=[child accessibilityLabel];
+                if(l&&[l rangeOfString:label].location!=NSNotFound){
+                    [child accessibilityActivate];
+                    LOG(@"Match: activated Flutter '%@'",l);
+                    return YES;
+                }
+            }
+            if(activateFlutterButton(label,child))return YES;
+        }
+    }
+    // 递归子视图
+    for(UIView *sub in view.subviews){
+        if(activateFlutterButton(label,sub))return YES;
+    }
+    return NO;
+}
+
+static void doMatch(void) {
+    LOG(@"doMatch()");
+    UIWindow *kw=keyWin(); if(!kw)return;
+    NSArray *labels=@[@"开始匹配",@"在线匹配",@"匹配",@"随机匹配",@"视频匹配",@"语音匹配",@"连线",@"速配",@"聊",@"连麦"];
+    for(NSString *l in labels){
+        if(activateFlutterButton(l,kw)){
+            _lastMatch=[[NSDate date] timeIntervalSince1970];
+            return;
+        }
+    }
+    LOG(@"Match: button not found");
+    _lastMatch=[[NSDate date] timeIntervalSince1970];
+}
 
 static void sendHiIfMatched(void) {
     if(!_matching)return;
