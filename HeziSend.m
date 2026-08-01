@@ -508,10 +508,14 @@ static void sendHiIfMatched(void) {
             if ([chatVC respondsToSelector:sendSel]) {
                 ((void(*)(id,SEL,id,id))objc_msgSend)(chatVC, sendSel, @"嗨", nil);
                 LOG(@"Match: SENT hi via %@!", cn);
-                _matching = NO; // 发完关匹配
+                // 关匹配（设标志避免 setOn 触发 toggle 回来）
+                _matching = NO;
+                _programmaticSwitch = YES;
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [_matchSwitch setOn:NO animated:YES];
+                    _programmaticSwitch = NO;
                 });
+                // 已发过，停止后续检查
                 return;
             }
         }
@@ -540,7 +544,9 @@ static void startAutoMatch(void) {
 }
 
 // ==================== 匹配开关 ====================
+static BOOL _programmaticSwitch = NO;
 static void onMatchToggle(id self, SEL _cmd) {
+    if (_programmaticSwitch) return; // 代码关开关时不触发
     _matching = !_matching;
     LOG(@"Match toggle: %@", _matching ? @"ON" : @"OFF");
     dispatch_async(dispatch_get_main_queue(), ^{
