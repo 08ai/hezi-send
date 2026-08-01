@@ -30,7 +30,7 @@ static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text 
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
 static void doMatch(void) {
-    LOG(@"doMatch Photon try");
+    LOG(@"doMatch!");
     Class pic=objc_getClass("PhotonIMClient"),pmsg=objc_getClass("PhotonIMMessage");
     if(!pic||!pmsg)return;
     id c=((id(*)(Class,SEL))objc_msgSend)(pic,sel_registerName("sharedClient"));
@@ -49,7 +49,7 @@ static void doMatch(void) {
 
 static void sendHiIfMatched(void) { if(!_matching)return; Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return; UIWindow *kw=keyWin(); if(!kw)return; id cur=kw.rootViewController, chatVC=nil; for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; } if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"SENT hi!"); _matching=NO; _progSwitch=YES; dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } } }
 
-static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(1){ sleep(2); if(!_matching)continue; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); } }); }
+static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ int tick=0; while(1){ sleep(2); if(!_matching){tick=0;continue;} tick++; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); if(tick%8==0&&[[NSDate date] timeIntervalSince1970]-_lastMatch>=10){ dispatch_async(dispatch_get_main_queue(),^{doMatch();}); } } }); }
 
 static void onMatchToggle(id self, SEL _cmd) { if(_progSwitch)return; _matching=!_matching; dispatch_async(dispatch_get_main_queue(),^{ if(_matching){toast(@"检测中");}else{toast(@"已关闭");} }); }
 
