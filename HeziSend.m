@@ -372,18 +372,32 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) return;
 
-        // 找 VC 实例
+        // 找 VC 实例（递归遍历 navigation/tab/presented）
         UIWindow *kw = keyWin();
         if (!kw) return;
-        id vc = kw.rootViewController;
-        id matchVC = nil;
-        for (int i = 0; i < 20 && vc && !matchVC; i++) {
-            if ([vc isKindOfClass:matchCls]) { matchVC = vc; break; }
+
+        __block id matchVC = nil;
+        void (^findVC)(id) = ^(id vc) {
+            if (!vc || matchVC) return;
+            if ([vc isKindOfClass:matchCls]) { matchVC = vc; return; }
+            // presented
             SEL ps = sel_registerName("presentedViewController");
             id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
-            if (pres) { vc = pres; continue; }
-            break;
-        }
+            if (pres) findVC(pres);
+            // navigation stack
+            SEL vs = sel_registerName("viewControllers");
+            if ([vc respondsToSelector:vs]) {
+                NSArray *vcs = ((id(*)(id,SEL))objc_msgSend)(vc, vs);
+                for (id child in vcs) findVC(child);
+            }
+            // child VCs
+            SEL cs = sel_registerName("childViewControllers");
+            if ([vc respondsToSelector:cs]) {
+                NSArray *children = ((id(*)(id,SEL))objc_msgSend)(vc, cs);
+                for (id child in children) findVC(child);
+            }
+        };
+        findVC(kw.rootViewController);
         if (!matchVC) { toast(@"请先进匹配页"); return; }
 
         // 获取 model
