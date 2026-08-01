@@ -225,10 +225,20 @@ static void doMatch(void) {
     LOG(@"doMatch() called");
     @try {
         UIWindow *kw = keyWin(); if (!kw) { LOG(@"doMatch: no keyWindow"); return; }
-        // 方式1: 辅助功能找"匹配"按钮（对 Flutter 有效）
-        id el = findA11yElement(@"匹配", kw);
-        LOG(@"doMatch: a11y result=%@", el ? @"FOUND" : @"nil");
-        if (el) { LOG(@"Match: a11y element found, activating"); [el accessibilityActivate]; _lastMatch = [[NSDate date] timeIntervalSince1970]; return; }
+        // 方式1: 辅助功能找匹配按钮（尝试各种可能的标签）
+        NSArray *labels = @[@"匹配", @"开始匹配", @"在线匹配", @"随机匹配", @"视频匹配",
+                            @"语音匹配", @"快速匹配", @"match", @"start", @"开始",
+                            @"配对", @"连线", @"速配", @"聊", @"连麦"];
+        for (NSString *lb in labels) {
+            id el = findA11yElement(lb, kw);
+            if (el) {
+                LOG(@"Match: a11y found '%@', activating", lb);
+                [el accessibilityActivate];
+                _lastMatch = [[NSDate date] timeIntervalSince1970];
+                return;
+            }
+        }
+        LOG(@"doMatch: a11y all nil");
 
         // 方式2: 找 HZRandomMatchViewController
         Class mc = objc_getClass("HZRandomMatchViewController"); if (!mc) return;
