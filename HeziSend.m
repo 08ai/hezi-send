@@ -285,11 +285,9 @@ static void doMatch(void) {
             if (pres) { curVC = pres; continue; }
             break;
         }
-        id nav = ((id(*)(id,SEL))objc_msgSend)(curVC, @selector(navigationController));
-        if (!nav) { LOG(@"Match: no nav controller"); return; }
-
-        ((void(*)(id,SEL,id,BOOL))objc_msgSend)(nav, @selector(pushViewController:animated:), vc, NO);
-        LOG(@"Match: VC pushed");
+        // Present modally
+        ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(curVC, @selector(presentViewController:animated:completion:), vc, NO, nil);
+        LOG(@"Match: VC presented");
 
         // 等页面加载后触发匹配
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
