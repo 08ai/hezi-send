@@ -306,26 +306,28 @@ static void makeButton(void) {
         [kw addSubview:_btn];
         LOG(@"Send button at (%.0f,%.0f)", bx, by);
 
-        // ── 匹配开关 (绿色按钮上方) ──
-        CGFloat mby = by - bs - 10;
-        _matchLabel = [[UILabel alloc] initWithFrame:CGRectMake(bx - 40, mby, 35, 33)];
-        _matchLabel.text = labelText(@"匹配");
-        _matchLabel.font = [UIFont boldSystemFontOfSize:12];
-        _matchLabel.textColor = [UIColor whiteColor];
-        _matchLabel.textAlignment = NSTextAlignmentRight;
-        _matchLabel.layer.shadowColor = [UIColor blackColor].CGColor;
-        _matchLabel.layer.shadowOffset = CGSizeMake(0, 1);
-        _matchLabel.layer.shadowRadius = 2;
-        _matchLabel.layer.shadowOpacity = 0.6;
-        [kw addSubview:_matchLabel];
+        // ── 匹配开关 (绿色按钮正上方) ──
+        // 背景小面板
+        CGFloat panelW = 80, panelH = 58;
+        UIView *matchPanel = [[UIView alloc] initWithFrame:CGRectMake(bx - 10, by - panelH - 8, panelW, panelH)];
+        matchPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.55];
+        matchPanel.layer.cornerRadius = 12;
+        [kw addSubview:matchPanel];
 
-        _matchSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(bx - 5, mby - 4, 51, 31)];
+        // 标签
+        _matchLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, panelW, 16)];
+        _matchLabel.text = labelText(@"匹配");
+        _matchLabel.font = [UIFont boldSystemFontOfSize:11];
+        _matchLabel.textColor = [UIColor whiteColor];
+        _matchLabel.textAlignment = NSTextAlignmentCenter;
+        [matchPanel addSubview:_matchLabel];
+
+        // 开关
+        _matchSwitch = [[UISwitch alloc] initWithFrame:CGRectMake((panelW - 51) / 2, 20, 51, 31)];
         _matchSwitch.onTintColor = [UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1];
         [_matchSwitch setOn:NO];
-        [kw addSubview:_matchSwitch];
-        // 添加事件
-        [_matchSwitch addTarget:NSClassFromString(@"NSObject") action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
-        // 用 helper 类处理
+        [matchPanel addSubview:_matchSwitch];
+
         static id matchTarget = nil;
         if (!matchTarget) {
             Class helper = objc_allocateClassPair([NSObject class], "HZMatchHelper", 0);
@@ -334,7 +336,7 @@ static void makeButton(void) {
             matchTarget = [[helper alloc] init];
         }
         [_matchSwitch addTarget:matchTarget action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
-        LOG(@"Match switch at (%.0f,%.0f)", bx - 50, mby);
+        LOG(@"Match switch panel created");
 
         // Switch 状态同步定时器
         [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
@@ -350,18 +352,13 @@ static void makeButton(void) {
                 [_btn removeFromSuperview];
                 [kw2 addSubview:_btn];
             }
-            if (kw2 && _matchSwitch.superview != kw2) {
-                [_matchSwitch removeFromSuperview];
-                [kw2 addSubview:_matchSwitch];
-            }
-            if (kw2 && _matchLabel.superview != kw2) {
-                [_matchLabel removeFromSuperview];
-                [kw2 addSubview:_matchLabel];
+            if (kw2 && matchPanel.superview != kw2) {
+                [matchPanel removeFromSuperview];
+                [kw2 addSubview:matchPanel];
             }
             if (kw2) {
                 [kw2 bringSubviewToFront:_btn];
-                [kw2 bringSubviewToFront:_matchLabel];
-                [kw2 bringSubviewToFront:_matchSwitch];
+                [kw2 bringSubviewToFront:matchPanel];
             }
         }];
     });
