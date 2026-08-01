@@ -162,17 +162,60 @@ static BOOL activateFlutterButton(NSString *label, UIView *view) {
 }
 
 static void doMatch(void) {
-    LOG(@"doMatch()");
-    UIWindow *kw=keyWin(); if(!kw)return;
-    NSArray *labels=@[@"开始匹配",@"在线匹配",@"匹配",@"随机匹配",@"视频匹配",@"语音匹配",@"连线",@"速配",@"聊",@"连麦"];
-    for(NSString *l in labels){
-        if(activateFlutterButton(l,kw)){
-            _lastMatch=[[NSDate date] timeIntervalSince1970];
-            return;
+    LOG(@"doMatch: sending HTTP match request");
+    // 1. 获取 fr (用户 ID)
+    NSString *fr = nil;
+    NSArray *uids = loadUserIDs();
+    // 从 DB 获取当前用户的 fr
+    NSString *dbPath = findDBPath();
+    if(dbPath){
+        sqlite3 *db=NULL; sqlite3_stmt *st=NULL;
+        if(sqlite3_open([dbPath UTF8String],&db)==SQLITE_OK){
+            // 尝试从某处读取当前用户 ID
+            if(sqlite3_prepare_v2(db,"SELECT value FROM md_config WHERE key='user_id'",-1,&st,NULL)==SQLITE_OK){
+                if(sqlite3_step(st)==SQLITE_ROW){ const char *c=(const char*)sqlite3_column_text(st,0); if(c) fr=[NSString stringWithUTF8String:c]; }
+                sqlite3_finalize(st);
+            }
+            sqlite3_close(db);
         }
     }
-    LOG(@"Match: button not found");
-    _lastMatch=[[NSDate date] timeIntervalSince1970];
+    if(!fr) fr = @"48051782"; // fallback
+
+    // 2. 获取 SESSIONID cookie
+    NSString *sessionId = nil;
+    NSHTTPCookieStorage *cs = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    for(NSHTTPCookie *ck in cs.cookies){
+        if([ck.name isEqualToString:@"SESSIONID"] && [ck.domain containsString:@"mokatech"]){
+            sessionId = ck.value; break;
+        }
+    }
+    if(!sessionId) { LOG(@"Match: no SESSIONID cookie"); return; }
+
+    // 3. 发送匹配请求
+    NSString *urlStr = [NSString stringWithFormat:@"https://vchat-api.mokatech.cn/like/find/match?fr=%@", fr];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+    [req setHTTPMethod:@"POST"];
+    [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"content-type"];
+    [req setValue:[NSString stringWithFormat:@"SESSIONID=%@", sessionId] forHTTPHeaderField:@"cookie"];
+    [req setValue:@"Vchat/4.9.3 ios/2130 (iPhone 11; iOS 15.3.1; zh_CN; iPhone12,1; S2)" forHTTPHeaderField:@"user-agent"];
+    [req setValue:@"*/*" forHTTPHeaderField:@"accept"];
+    [req setValue:@"zh-Hans-CN;q=1" forHTTPHeaderField:@"accept-language"];
+    [req setValue:@"1" forHTTPHeaderField:@"x-lv"];
+
+    dispatch_async(dispatch_get_global_queue(0,0), ^{
+        NSURLSession *sess = [NSURLSession sharedSession];
+        NSURLSessionDataTask *task = [sess dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err){
+            if(err){
+                LOG(@"Match API error: %@", err);
+            } else {
+                NSInteger code = ((NSHTTPURLResponse*)resp).statusCode;
+                NSString *body = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"";
+                LOG(@"Match API: %ld %@", (long)code, body?:@"");
+            }
+        }];
+        [task resume];
+    });
+    _lastMatch = [[NSDate date] timeIntervalSince1970];
 }
 
 static void sendHiIfMatched(void) {
