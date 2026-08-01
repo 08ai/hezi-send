@@ -49,44 +49,10 @@ static void doMatch(void) {
     // 在 config 上设 URL
     NSString *urlStr = @"https://vchat-api.mokatech.cn/like/find/match?fr=48051782";
     if(config){
-        @try {
-            [config setValue:urlStr forKey:@"url"];
-            LOG(@"Match: config.url set");
-        } @catch(NSException *e){ LOG(@"KVC url fail: %@", e); }
-        @try {
-            [config setValue:urlStr forKey:@"URL"];
-            LOG(@"Match: config.URL set");
-        } @catch(NSException *e){}
-        @try {
-            [config setValue:urlStr forKey:@"requestURL"];
-            LOG(@"Match: config.requestURL set");
-        } @catch(NSException *e){}
-        @try {
-            [config setValue:@"POST" forKey:@"httpMethod"];
-            LOG(@"Match: config.httpMethod set");
-        } @catch(NSException *e){}
-        @try {
-            [config setValue:@"POST" forKey:@"method"];
-            LOG(@"Match: config.method set");
-        } @catch(NSException *e){}
-        @try {
-            [config setValue:@{@"fr":@"48051782"} forKey:@"params"];
-            LOG(@"Match: config.params set");
-        } @catch(NSException *e){}
-        @try {
-            [config setValue:@{@"fr":@"48051782"} forKey:@"parameters"];
-            LOG(@"Match: config.parameters set");
-        } @catch(NSException *e){}
+        [config setValue:urlStr forKey:@"URLString"]; LOG(@"Match: URLString=%@", [config valueForKey:@"URLString"]);
+        [config setValue:@"POST" forKey:@"HTTPMethod"];
+        [config setValue:@{@"fr":@"48051782"} forKey:@"parameters"];
     }
-
-    // dump config ivars
-    unsigned int cc=0; Ivar *ivs = class_copyIvarList([config class], &cc);
-    for(unsigned int i=0;i<cc;i++){
-        const char *n = ivar_getName(ivs[i]);
-        const char *t = ivar_getTypeEncoding(ivs[i]);
-        if(t && t[0]=='@'){ id v = object_getIvar(config, ivs[i]); LOG(@"  config.%s=%@", n, v?:@"nil"); }
-    }
-    free(ivs);
 
     if([req respondsToSelector:@selector(start)]){
         ((void(*)(id,SEL))objc_msgSend)(req, @selector(start));
