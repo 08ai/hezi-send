@@ -541,13 +541,61 @@ static void navPushHook(id self, SEL _cmd, id vc, BOOL animated) {
 }
 
 static IMP _origPushIMP = NULL;
+static void captureMatchVC(id vc) {
+    Class matchCls = objc_getClass("HZRandomMatchViewController");
+    if (matchCls && vc && [vc isKindOfClass:matchCls]) {
+        _capturedMatchVC = vc;
+        LOG(@"Match: captured real VC!");
+    }
+}
+
+static IMP _origPushIMP = NULL;
+static IMP _origPresentIMP = NULL;
+
+// Hook UINavigationController pushViewController:
+static void navPushHook(id self, SEL _cmd, id vc, BOOL animated) {
+    captureMatchVC(vc);
+    if (_origPushIMP) ((void(*)(id,SEL,id,BOOL))_origPushIMP)(self, _cmd, vc, animated);
+}
+
+// Hook UIViewController presentViewController:
+static void presentHook(id self, SEL _cmd, id vc, BOOL animated, id completion) {
+    captureMatchVC(vc);
+    if (_origPresentIMP) ((void(*)(id,SEL,id,BOOL,id))_origPresentIMP)(self, _cmd, vc, animated, completion);
+}
+
 static void installNavHook(void) {
+    // Hook push
     Class navCls = objc_getClass("UINavigationController");
-    if (!navCls) return;
-    Method m = class_getInstanceMethod(navCls, sel_registerName("pushViewController:animated:"));
-    if (!m) return;
-    _origPushIMP = method_setImplementation(m, (IMP)navPushHook);
-    LOG(@"Match: nav hook installed, orig=%p", _origPushIMP);
+    if (navCls) {
+        Method pm = class_getInstanceMethod(navCls, sel_registerName("pushViewController:animated:"));
+        if (pm) { _origPushIMP = method_setImplementation(pm, (IMP)navPushHook); LOG(@"Match: push hook OK"); }
+    }
+    // Hook present
+    Class vcCls = objc_getClass("UIViewController");
+    if (vcCls) {
+        Method sm = class_getInstanceMethod(vcCls, sel_registerName("presentViewController:animated:completion:"));
+        if (sm) { _origPresentIMP = method_setImplementation(sm, (IMP)presentHook); LOG(@"Match: present hook OK"); }
+    }
+    // 如果当前已经在匹配页，直接搜索捕获
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        Class matchCls = objc_getClass("HZRandomMatchViewController");
+        if (!matchCls) return;
+        UIWindow *kw = keyWin();
+        if (!kw) return;
+        // 深层搜索
+        id found = findMatchVC(matchCls, kw.rootViewController, 0);
+        if (!found) {
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                found = findMatchVC(matchCls, w.rootViewController, 0);
+                if (found) break;
+            }
+        }
+        if (found) {
+            _capturedMatchVC = found;
+            LOG(@"Match: captured existing VC from hierarchy");
+        }
+    });
 }
 
 // ==================== 入口 ====================
