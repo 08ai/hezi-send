@@ -267,7 +267,7 @@ static void startPolling(void) {
 }
 
 // 前置声明
-static void onMatchTap(id self, SEL _cmd);
+static void onMatchToggle(id self, SEL _cmd);
 
 // ==================== UI 按钮 ====================
 static void makeButton(void) {
@@ -309,7 +309,7 @@ static void makeButton(void) {
         // ── 匹配开关 (绿色按钮正上方) ──
         // 背景小面板
         CGFloat panelW = 80, panelH = 58;
-        UIView *matchPanel = [[UIView alloc] initWithFrame:CGRectMake(bx - 10, by - panelH - 8, panelW, panelH)];
+        __block UIView *matchPanel = [[UIView alloc] initWithFrame:CGRectMake(bx - 10, by - panelH - 8, panelW, panelH)];
         matchPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.55];
         matchPanel.layer.cornerRadius = 12;
         [kw addSubview:matchPanel];
