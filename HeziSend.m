@@ -65,7 +65,7 @@ static void sendHZHTTP(NSString *url){
                     if(_matching)dispatch_async(dispatch_get_main_queue(),^{doMatch();});
                 }
             }
-        } forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
+        }} forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
         @try{[cfg setValue:^(NSError *e){LOG(@"HZHTTP err:%@",e); if([url containsString:@"like/find/match"]&&![url containsString:@"card"]){ _matching=NO;_progSwitch=YES;dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } } forKey:@"requestFailureBlock"];}@catch(NSException *e){}
     }
     if([req respondsToSelector:@selector(start)]){((void(*)(id,SEL))objc_msgSend)(req,@selector(start));LOG(@"HZHTTP sent:%@",url);}
