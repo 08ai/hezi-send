@@ -365,97 +365,43 @@ static void makeButton(void) {
 }
 
 // ==================== 在线匹配 ====================
-// 前置声明
 static void sendHiIfMatched(void);
 
-// 递归找按钮（限制深度防崩溃）
-static UIButton* findMatchButtonDepth(UIView *view, int depth) {
-    if (!view || depth > 15) return nil;
-    if ([view isKindOfClass:[UIButton class]]) {
-        UIButton *btn = (UIButton *)view;
-        @try {
-            NSString *title = [btn currentTitle];
-            if (title && [title rangeOfString:@"匹配" options:NSCaseInsensitiveSearch].location != NSNotFound)
-                return btn;
-        } @catch (NSException *e) {}
-    }
-    @try {
-        NSArray *subs = view.subviews;
-        for (UIView *sub in subs) {
-            UIButton *found = findMatchButtonDepth(sub, depth + 1);
-            if (found) return found;
-        }
-    } @catch (NSException *e) {}
-    return nil;
-}
-
+// 通过 PhotonIMClient 发匹配请求（和发消息一样走 Photon 协议）
 static void doMatch(void) {
     @try {
-        UIWindow *kw = keyWin();
-        if (!kw) return;
+        Class clientCls = objc_getClass("PhotonIMClient");
+        Class msgCls = objc_getClass("PhotonIMMessage");
+        if (!clientCls || !msgCls) { LOG(@"Photon classes missing"); return; }
 
-        // 方式1：在屏幕上找含"匹配"的按钮直接点
-        UIButton *btn = findMatchButtonDepth(kw, 0);
-        if (btn && btn.enabled && !btn.hidden) {
-            LOG(@"Match: tapping button");
-            [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-            _lastMatch = [[NSDate date] timeIntervalSince1970];
-            // 延迟检查是否匹配成功并发送"嗨"
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                sendHiIfMatched();
-            });
-            return;
-        }
+        id client = ((id(*)(Class,SEL))objc_msgSend)(clientCls, sel_registerName("sharedClient"));
+        if (!client) { LOG(@"sharedClient nil"); return; }
 
-        // 方式2：找 HZRandomMatchViewController
-        Class matchCls = objc_getClass("HZRandomMatchViewController");
-        if (!matchCls) return;
+        // PhotonIMMessage.commonMessageWithFrid:toid:messageType:chatType:
+        // 尝试不同的 messageType 触发匹配（1=文字, 可能 100+=匹配）
+        SEL msgSel = sel_registerName("commonMessageWithFrid:toid:messageType:chatType:");
+        if (![msgCls respondsToSelector:msgSel]) { LOG(@"commonMessageWithFrid not found"); return; }
 
-        // 简单遍历 VC 链
-        id vc = kw.rootViewController;
-        id matchVC = nil;
-        for (int i = 0; i < 20 && vc && !matchVC; i++) {
-            if ([vc isKindOfClass:matchCls]) { matchVC = vc; break; }
-            SEL ps = sel_registerName("presentedViewController");
-            id pres = ((id(*)(id,SEL))objc_msgSend)(vc, ps);
-            if (pres) { vc = pres; continue; }
-            SEL cs = sel_registerName("childViewControllers");
-            if ([vc respondsToSelector:cs]) {
-                NSArray *children = ((id(*)(id,SEL))objc_msgSend)(vc, cs);
-                if (children.count > 0) { vc = children.lastObject; continue; }
-            }
-            break;
-        }
+        // 用特殊消息类型触发匹配（尝试 100, 200, 1000）
+        int types[] = {100, 200, 1000};
+        NSString *myId = @"0"; // Photon 会自动填
 
-        if (!matchVC) return;
-
-        // 在 VC 的 view 里找匹配按钮
-        UIView *vcView = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("view"));
-        btn = findMatchButtonDepth(vcView, 0);
-        if (btn && btn.enabled && !btn.hidden) {
-            LOG(@"Match: tapping VC button");
-            [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-            _lastMatch = [[NSDate date] timeIntervalSince1970];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                sendHiIfMatched();
-            });
-            return;
-        }
-
-        // 方式3：尝试调 startMatch / startLink
-        SEL s = sel_registerName("startMatch");
-        if ([matchVC respondsToSelector:s]) {
-            ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
-            _lastMatch = [[NSDate date] timeIntervalSince1970];
-            LOG(@"Match: startMatch called");
-        } else {
-            s = sel_registerName("startLink");
-            if ([matchVC respondsToSelector:s]) {
-                ((void(*)(id,SEL))objc_msgSend)(matchVC, s);
-                _lastMatch = [[NSDate date] timeIntervalSince1970];
-                LOG(@"Match: startLink called");
+        for (int i = 0; i < 3; i++) {
+            id msg = ((id(*)(Class,SEL,id,id,NSInteger,NSInteger))objc_msgSend)(
+                msgCls, msgSel, myId, myId, types[i], 2); // chatType=2 (可能是匹配)
+            if (msg) {
+                SEL sendSel = sel_registerName("sendMessage:completion:");
+                if ([client respondsToSelector:sendSel]) {
+                    ((void(*)(id,SEL,id,id))objc_msgSend)(client, sendSel, msg, nil);
+                    LOG(@"Match: sent type=%d", types[i]);
+                }
             }
         }
+        _lastMatch = [[NSDate date] timeIntervalSince1970];
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            sendHiIfMatched();
+        });
     } @catch (NSException *e) {
         LOG(@"Match crash: %@", e);
     }
