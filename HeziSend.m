@@ -367,24 +367,36 @@ static void makeButton(void) {
 // ==================== 在线匹配 ====================
 static void sendHiIfMatched(void);
 
-// 简单 VC 遍历（不用递归 block，避免 ARC 问题）
-static id findMatchVC(Class cls, id root) {
-    if (!root) return nil;
+// 递归遍历 VC 树
+static id findMatchVC(Class cls, id root, int depth) {
+    if (!root || depth > 30) return nil;
     if ([root isKindOfClass:cls]) return root;
     // presented
     id pres = ((id(*)(id,SEL))objc_msgSend)(root, sel_registerName("presentedViewController"));
-    if (pres) { id found = findMatchVC(cls, pres); if (found) return found; }
-    // navigation
+    if (pres) { id f = findMatchVC(cls, pres, depth+1); if (f) return f; }
+    // navigation stack
     SEL vs = sel_registerName("viewControllers");
     if ([root respondsToSelector:vs]) {
         NSArray *vcs = ((id(*)(id,SEL))objc_msgSend)(root, vs);
-        for (id c in vcs) { id found = findMatchVC(cls, c); if (found) return found; }
+        for (id c in vcs) { id f = findMatchVC(cls, c, depth+1); if (f) return f; }
     }
-    // child
+    // child VCs
     SEL cs = sel_registerName("childViewControllers");
     if ([root respondsToSelector:cs]) {
         NSArray *children = ((id(*)(id,SEL))objc_msgSend)(root, cs);
-        for (id c in children) { id found = findMatchVC(cls, c); if (found) return found; }
+        for (id c in children) { id f = findMatchVC(cls, c, depth+1); if (f) return f; }
+    }
+    // Also check selectedViewController for tab controllers
+    SEL sS = sel_registerName("selectedViewController");
+    if ([root respondsToSelector:sS]) {
+        id selVC = ((id(*)(id,SEL))objc_msgSend)(root, sS);
+        if (selVC) { id f = findMatchVC(cls, selVC, depth+1); if (f) return f; }
+    }
+    // Check topViewController for nav controllers
+    SEL tS = sel_registerName("topViewController");
+    if ([root respondsToSelector:tS]) {
+        id topVC = ((id(*)(id,SEL))objc_msgSend)(root, tS);
+        if (topVC && topVC != root) { id f = findMatchVC(cls, topVC, depth+1); if (f) return f; }
     }
     return nil;
 }
@@ -395,11 +407,19 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        UIWindow *kw = keyWin();
-        if (!kw) { LOG(@"No keyWindow"); return; }
-
-        id matchVC = findMatchVC(matchCls, kw.rootViewController);
-        if (!matchVC) { return; }  // 不在匹配页，跳过（用户手动进入后会自动触发）
+        // 搜所有窗口
+        id matchVC = nil;
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]])
+                for (UIWindow *w in ((UIWindowScene*)s).windows)
+                    if ((matchVC = findMatchVC(matchCls, w.rootViewController, 0))) break;
+            if (matchVC) break;
+        }
+        if (!matchVC) {
+            for (UIWindow *w in [UIApplication sharedApplication].windows)
+                if ((matchVC = findMatchVC(matchCls, w.rootViewController, 0))) break;
+        }
+        if (!matchVC) { return; }（用户手动进入后会自动触发）
 
         // 获取 model
         id model = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("model"));
