@@ -273,44 +273,57 @@ static void doMatch(void) {
         Class mc = objc_getClass("HZRandomMatchViewController");
         if (!mc) return;
 
-        // 创建实例并加载 view
         id vc = ((id(*)(Class,SEL))objc_msgSend)([mc class], @selector(alloc));
         vc = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(init));
         if (!vc) { LOG(@"Match: init failed"); return; }
 
-        // 强制加载 view
-        ((void(*)(id,SEL))objc_msgSend)(vc, @selector(loadViewIfNeeded));
-        id view = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(view));
-        LOG(@"Match: VC view=%@", view ? @"loaded" : @"nil");
-
-        // 尝试 showVoiceMatchWithGoto: 或其他已知方法
-        SEL showVoice = NSSelectorFromString(@"showVoiceMatchWithGoto:");
-        if ([vc respondsToSelector:showVoice]) {
-            ((void(*)(id,SEL,id))objc_msgSend)(vc, showVoice, vc);
-            LOG(@"Match: showVoiceMatchWithGoto called");
+        // Push 到当前 NavigationController（VC 需要在导航栈里才能正常工作）
+        UIWindow *kw = keyWin();
+        id curVC = kw.rootViewController;
+        while (1) {
+            id pres = ((id(*)(id,SEL))objc_msgSend)(curVC, @selector(presentedViewController));
+            if (pres) { curVC = pres; continue; }
+            break;
         }
+        id nav = ((id(*)(id,SEL))objc_msgSend)(curVC, @selector(navigationController));
+        if (!nav) { LOG(@"Match: no nav controller"); return; }
 
-        SEL voiceCheck = NSSelectorFromString(@"voiceCheckWithGoto:");
-        if ([vc respondsToSelector:voiceCheck]) {
-            ((void(*)(id,SEL,id))objc_msgSend)(vc, voiceCheck, vc);
-            LOG(@"Match: voiceCheckWithGoto called");
-        }
+        ((void(*)(id,SEL,id,BOOL))objc_msgSend)(nav, @selector(pushViewController:animated:), vc, NO);
+        LOG(@"Match: VC pushed");
 
-        // 获取 model 并调用 buttonActionWithModel
-        id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
-        LOG(@"Match: model=%@", model ? @"exists" : @"nil");
-        SEL btnSel = NSSelectorFromString(@"buttonActionWithModel:");
-        if (model && [vc respondsToSelector:btnSel]) {
-            ((void(*)(id,SEL,id))objc_msgSend)(vc, btnSel, model);
-            LOG(@"Match: buttonActionWithModel called");
-        }
+        // 等页面加载后触发匹配
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
+            LOG(@"Match: model=%@", model ? @"exists" : @"nil");
 
-        // 也调 requestData
-        SEL reqSel = NSSelectorFromString(@"requestData");
-        if ([vc respondsToSelector:reqSel]) {
-            ((void(*)(id,SEL))objc_msgSend)(vc, reqSel);
-            LOG(@"Match: requestData called");
-        }
+            // 先调 requestData（不需要 model）
+            SEL reqSel = NSSelectorFromString(@"requestData");
+            if ([vc respondsToSelector:reqSel]) {
+                ((void(*)(id,SEL))objc_msgSend)(vc, reqSel);
+                LOG(@"Match: requestData called");
+            }
+
+            // 调 buttonActionWithModel（用 model）
+            SEL btnSel = NSSelectorFromString(@"buttonActionWithModel:");
+            if (model && [vc respondsToSelector:btnSel]) {
+                ((void(*)(id,SEL,id))objc_msgSend)(vc, btnSel, model);
+                LOG(@"Match: buttonActionWithModel called");
+            }
+
+            // 调 showVoiceMatchWithGoto
+            SEL svSel = NSSelectorFromString(@"showVoiceMatchWithGoto:");
+            if ([vc respondsToSelector:svSel]) {
+                ((void(*)(id,SEL,id))objc_msgSend)(vc, svSel, vc);
+                LOG(@"Match: showVoiceMatchWithGoto called");
+            }
+
+            // 调 didTapInviteView
+            SEL diSel = NSSelectorFromString(@"didTapInviteView");
+            if ([vc respondsToSelector:diSel]) {
+                ((void(*)(id,SEL))objc_msgSend)(vc, diSel);
+                LOG(@"Match: didTapInviteView called");
+            }
+        });
 
         _lastMatch = [[NSDate date] timeIntervalSince1970];
     } @catch (NSException *e) { LOG(@"Match crash: %@", e); }
