@@ -407,19 +407,16 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        // 搜所有窗口
+        // 搜所有窗口找匹配页 VC
         id matchVC = nil;
-        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-            if ([s isKindOfClass:[UIWindowScene class]])
-                for (UIWindow *w in ((UIWindowScene*)s).windows)
-                    if ((matchVC = findMatchVC(matchCls, w.rootViewController, 0))) break;
-            if (matchVC) break;
-        }
+        UIWindow *kw = keyWin();
+        if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
         if (!matchVC) {
             for (UIWindow *w in [UIApplication sharedApplication].windows)
                 if ((matchVC = findMatchVC(matchCls, w.rootViewController, 0))) break;
         }
-        if (!matchVC) { return; }（用户手动进入后会自动触发）
+        LOG(@"Match VC: %@", matchVC ? @"FOUND" : @"NOT FOUND");
+        if (!matchVC) { return; }
 
         // 获取 model
         id model = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("model"));
