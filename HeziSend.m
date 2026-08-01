@@ -43,23 +43,18 @@ static void sendHZHTTP(NSString *url){
         @try{[cfg setValue:@"POST" forKey:@"HTTPMethod"];}@catch(NSException *e){}
         @try{[cfg setValue:@{@"fr":@"48051782"} forKey:@"parameters"];}@catch(NSException *e){}
         @try{[cfg setValue:^(id r){
-            LOG(@"HZHTTP ok:%@",[r class]);
-            if([url containsString:@"like/find/match"] && ![url containsString:@"card"]){
-                // 解析匹配到的用户ID
-                NSString *uid=nil;
-                if([r isKindOfClass:[NSDictionary class]]){
-                    id data=[(NSDictionary*)r objectForKey:@"data"];
-                    if([data isKindOfClass:[NSDictionary class]]) uid=[[data objectForKey:@"userid"] stringValue];
-                    if(!uid) uid=[[(NSDictionary*)r objectForKey:@"userid"] stringValue];
-                }else if([r isKindOfClass:[NSString class]]){
-                    uid=(NSString*)r;
-                }
-                if(uid&&uid.length>3&&![uid isEqualToString:@"1"]){
-                    dispatch_async(dispatch_get_main_queue(),^{sendMsg(uid,@"嗨");});
-                    _matchCount++; LOG(@"SENT hi to %@ (%d/%d)",uid,_matchCount,_matchTarget);
-                    if(_matchCount>=_matchTarget){_matching=NO;_progSwitch=YES;dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;});}
+            LOG(@"HZHTTP resp: %@", r);
+            // 从 response 提取 userid 直接发嗨
+            if(r && [r respondsToSelector:sel_registerName("objectForKey:")]){
+                id uid=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"userid");
+                if(!uid){id data=((id(*)(id,SEL,id))objc_msgSend)(r,sel_registerName("objectForKey:"),@"data");
+                    if(data)uid=((id(*)(id,SEL,id))objc_msgSend)(data,sel_registerName("objectForKey:"),@"userid");}
+                if(uid){NSString *sid=[uid description];if(sid.length>3&&![sid isEqualToString:@"1"]){
+                    dispatch_async(dispatch_get_main_queue(),^{sendMsg(sid,@"嗨");});
+                    _matchCount++;LOG(@"MATCH %d/%d -> %@",_matchCount,_matchTarget,sid);
+                    if(_matchCount>=_matchTarget){_matching=NO;}
                     else{_matching=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{_matching=YES;doMatch();});}
-                }
+                }}
             }
         } forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
         @try{[cfg setValue:^(NSError *e){LOG(@"HZHTTP err:%@",e);} forKey:@"requestFailureBlock"];}@catch(NSException *e){}
