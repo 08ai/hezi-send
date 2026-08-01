@@ -365,66 +365,86 @@ static void makeButton(void) {
 }
 
 // ==================== 在线匹配 ====================
-static void doMatch(void) {
-    Class matchCls = objc_getClass("HZRandomMatchViewController");
-    if (!matchCls) { toast(@"匹配类不存在"); return; }
+// 递归找按钮：标题包含关键词
+static UIButton* findMatchButton(UIView *view) {
+    if (!view) return nil;
+    // 先看自己
+    if ([view isKindOfClass:[UIButton class]]) {
+        UIButton *btn = (UIButton *)view;
+        NSString *title = [btn currentTitle];
+        if (title) {
+            NSRange r = [title rangeOfString:@"匹配" options:NSCaseInsensitiveSearch];
+            if (r.location != NSNotFound) return btn;
+        }
+    }
+    // 递归子视图
+    for (UIView *sub in view.subviews) {
+        UIButton *found = findMatchButton(sub);
+        if (found) return found;
+    }
+    return nil;
+}
 
-    // 找当前 VC 实例
+static void doMatch(void) {
     UIWindow *kw = keyWin();
     if (!kw) return;
+
+    // 方式1：在当前页面找匹配按钮直接点击
+    UIButton *btn = findMatchButton(kw);
+    if (btn && btn.enabled && !btn.hidden) {
+        LOG(@"Match: found button, sending tap");
+        [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+        _lastMatch = [[NSDate date] timeIntervalSince1970];
+        return;
+    }
+
+    // 方式2：找 HZRandomMatchViewController 并尝试调方法
+    Class matchCls = objc_getClass("HZRandomMatchViewController");
+    if (!matchCls) { toast(@"匹配页面未找到"); return; }
+
+    // 遍历 VC 找实例
     __block id matchVC = nil;
-    void (^find)(id) = nil;
-    find = ^(id vc) {
+    void (^findVC)(id) = nil;
+    findVC = ^(id vc) {
         if (!vc || matchVC) return;
         if ([vc isKindOfClass:matchCls]) { matchVC = vc; return; }
         id pres = ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("presentedViewController"));
-        if (pres) find(pres);
+        if (pres) findVC(pres);
         if ([vc respondsToSelector:sel_registerName("childViewControllers")]) {
-            for (id child in ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("childViewControllers"))) {
-                find(child);
-            }
+            for (id child in ((id(*)(id,SEL))objc_msgSend)(vc, sel_registerName("childViewControllers")))
+                findVC(child);
         }
     };
-    find(kw.rootViewController);
+    findVC(kw.rootViewController);
 
-    if (!matchVC) {
-        // 不在匹配页面，尝试发送进入匹配页的通知或直接创建
-        id newVC = ((id(*)(Class,SEL))objc_msgSend)([matchCls class], sel_registerName("alloc"));
-        newVC = ((id(*)(id,SEL))objc_msgSend)(newVC, sel_registerName("init"));
-        if (!newVC) { toast(@"无法创建匹配页"); return; }
-        // push 或 present
-        matchVC = newVC;
+    if (!matchVC) { toast(@"请先进入匹配页"); return; }
+
+    // 在 VC 的 view 里找匹配按钮
+    UIView *vcView = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("view"));
+    btn = findMatchButton(vcView);
+    if (btn && btn.enabled && !btn.hidden) {
+        LOG(@"Match: found button in VC");
+        [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+        _lastMatch = [[NSDate date] timeIntervalSince1970];
+        return;
     }
 
-    // 尝试调用可能的匹配方法
-    SEL matchSels[] = {
+    // 方式3：尝试调用常见方法
+    SEL trySels[] = {
         sel_registerName("startMatch"),
-        sel_registerName("startOnlineMatch"),
-        sel_registerName("startRandomMatch"),
-        sel_registerName("startMatching"),
-        sel_registerName("beginMatch"),
-        sel_registerName("start"),
         sel_registerName("startLink"),
         sel_registerName("connect"),
-        sel_registerName("enter"),
-        sel_registerName("join"),
+        sel_registerName("start"),
     };
-    int n = sizeof(matchSels) / sizeof(matchSels[0]);
-    BOOL called = NO;
-    for (int i = 0; i < n; i++) {
-        if ([matchVC respondsToSelector:matchSels[i]]) {
-            ((void(*)(id,SEL))objc_msgSend)(matchVC, matchSels[i]);
-            called = YES;
-            LOG(@"Match called: startMatch #%d", i);
-            break;
+    for (int i = 0; i < 4; i++) {
+        if ([matchVC respondsToSelector:trySels[i]]) {
+            ((void(*)(id,SEL))objc_msgSend)(matchVC, trySels[i]);
+            _lastMatch = [[NSDate date] timeIntervalSince1970];
+            LOG(@"Match: called selector #%d", i);
+            return;
         }
     }
-    if (called) {
-        toast(@"匹配已触发");
-        _lastMatch = [[NSDate date] timeIntervalSince1970];
-    } else {
-        toast(@"未找到匹配方法");
-    }
+    toast(@"未找到匹配按钮");
 }
 
 static void startAutoMatch(void) {
