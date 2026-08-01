@@ -407,32 +407,17 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        // 找或创建匹配页 VC
-        id matchVC = findMatchVC(matchCls, keyWin().rootViewController, 0);
+        // 找匹配页 VC（必须是 App 正常导航的实例，alloc/init 的空壳不行）
+        id matchVC = nil;
+        UIWindow *kw = keyWin();
+        if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
         if (!matchVC) {
-            // Flutter VC 不在 UIKit 层级，主动创建并 push
-            matchVC = ((id(*)(Class,SEL))objc_msgSend)([matchCls class], sel_registerName("alloc"));
-            matchVC = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("init"));
-            if (!matchVC) { LOG(@"Match: init failed"); return; }
-            // 找到当前顶层 VC 的 navigationController
-            UIWindow *kw = keyWin();
-            id topVC = kw.rootViewController;
-            while (1) {
-                id pres = ((id(*)(id,SEL))objc_msgSend)(topVC, sel_registerName("presentedViewController"));
-                if (pres) { topVC = pres; continue; }
-                break;
-            }
-            SEL ncSel = sel_registerName("navigationController");
-            id nav = nil;
-            if ([topVC respondsToSelector:ncSel]) nav = ((id(*)(id,SEL))objc_msgSend)(topVC, ncSel);
-            if (nav) {
-                ((void(*)(id,SEL,id,BOOL))objc_msgSend)(nav, sel_registerName("pushViewController:animated:"), matchVC, NO);
-                LOG(@"Match: pushed new VC");
-            } else {
-                ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(topVC, sel_registerName("presentViewController:animated:completion:"), matchVC, NO, nil);
-                LOG(@"Match: presented new VC");
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                matchVC = findMatchVC(matchCls, w.rootViewController, 0);
+                if (matchVC) break;
             }
         }
+        if (!matchVC) return;  // 静默跳过，等用户手动进匹配页
 
         // 延迟执行匹配动作
         id vcRef = matchVC;
