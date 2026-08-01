@@ -265,12 +265,19 @@ static void sendHiIfMatched(void) {
 // 自动匹配循环
 static void startAutoMatch(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        LOG(@"Auto-match loop started"); int tick = 0;
-        while (YES) { sleep(2);
-            if (!_matching) { tick = 0; continue; } tick++;
+        LOG(@"Auto-match loop STARTED"); int tick = 0;
+        while (YES) {
+            sleep(2);
+            LOG(@"Auto-match: tick=%d matching=%d", tick, _matching);
+            if (!_matching) { tick = 0; continue; }
+            tick++;
             dispatch_async(dispatch_get_main_queue(), ^{ sendHiIfMatched(); });
-            if (tick % 4 == 0 && [[NSDate date] timeIntervalSince1970] - _lastMatch >= 10) {
-                dispatch_async(dispatch_get_main_queue(), ^{ doMatch(); });
+            if (tick % 4 == 0) {
+                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                LOG(@"Auto-match: check doMatch (age=%.0fs)", now - _lastMatch);
+                if (now - _lastMatch >= 10) {
+                    dispatch_async(dispatch_get_main_queue(), ^{ doMatch(); });
+                }
             }
         }
     });
