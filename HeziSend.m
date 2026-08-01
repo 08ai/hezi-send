@@ -135,41 +135,7 @@ static BOOL tapAnyButton(UIView *view) {
     return NO;
 }
 
-static void doMatch(void) {
-    LOG(@"doMatch()");
-    @try {
-        // 创建并 present 匹配 VC
-        Class mc=objc_getClass("HZRandomMatchViewController"); if(!mc)return;
-        id vc=((id(*)(Class,SEL))objc_msgSend)([mc class],@selector(alloc));
-        vc=((id(*)(id,SEL))objc_msgSend)(vc,@selector(init));
-        if(!vc)return;
-        UIWindow *kw=keyWin(); if(!kw)return;
-        id cur=kw.rootViewController;
-        while(1){id p=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController));if(p){cur=p;continue;}break;}
-        ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(cur,@selector(presentViewController:animated:completion:),vc,NO,nil);
-        LOG(@"Match: VC presented");
-
-        // 延迟后先调方法，再找按钮点击
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1.5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-            // 调 requestData
-            SEL rs=NSSelectorFromString(@"requestData");
-            if([vc respondsToSelector:rs]){((void(*)(id,SEL))objc_msgSend)(vc,rs);LOG(@"Match: requestData");}
-            // 调 buttonActionWithModel
-            id m=((id(*)(id,SEL))objc_msgSend)(vc,@selector(model));
-            SEL bs=NSSelectorFromString(@"buttonActionWithModel:");
-            if([vc respondsToSelector:bs]){((void(*)(id,SEL,id))objc_msgSend)(vc,bs,m);LOG(@"Match: buttonActionWithModel");}
-            // 查找并点击匹配按钮
-            id view=((id(*)(id,SEL))objc_msgSend)(vc,@selector(view));
-            if(!tapAnyButton(view)){
-                LOG(@"Match: no native button, trying a11y...");
-                // dump 所有 a11y 标签（一次性）
-                static BOOL dumped=NO;
-                if(!dumped){dumped=YES;dumpA11y(view,0);}
-            }
-        });
-        _lastMatch=[[NSDate date] timeIntervalSince1970];
-    }@catch(NSException *e){LOG(@"Match crash: %@",e);}
-}
+static void doMatch(void) { LOG(@"doMatch: manual trigger only"); _lastMatch=[[NSDate date] timeIntervalSince1970]; }
 
 static void sendHiIfMatched(void) {
     if(!_matching)return;
@@ -194,4 +160,4 @@ _matchSwitch=[[UISwitch alloc] initWithFrame:CGRectMake((pW-51)/2,20,51,31)]; _m
 static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0);class_addMethod(h,sel_registerName("onMatchToggle:"),(IMP)onMatchToggle,"v@:@");objc_registerClassPair(h);t=[[h alloc] init];} [_matchSwitch addTarget:t action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
 [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
-__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); installTouchLogger(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
+__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
