@@ -407,12 +407,29 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        // 优先用截获的真实 VC
+        // 搜索匹配 VC：先遍历视图层级找关联的 VC
         id matchVC = _capturedMatchVC;
         if (!matchVC) {
-            // fallback: 搜索 VC 树
-            UIWindow *kw = keyWin();
-            if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
+            // 遍历所有窗口的所有 view，通过 nextResponder 找匹配 VC
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                matchVC = findMatchVC(matchCls, w.rootViewController, 0);
+                if (matchVC) break;
+                // 也遍历 view 层级
+                UIResponder *resp = w;
+                while ((resp = [resp nextResponder])) {
+                    if ([resp isKindOfClass:matchCls]) { matchVC = (id)resp; break; }
+                }
+                if (matchVC) break;
+            }
+            if (!matchVC) {
+                UIWindow *kw = keyWin();
+                if (kw) matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
+            }
+        }
+        if (!matchVC) {
+            // 最后手段：创建新实例（可能不完整但至少可以试）
+            matchVC = ((id(*)(Class,SEL))objc_msgSend)([matchCls class], sel_registerName("alloc"));
+            matchVC = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("init"));
         }
         if (!matchVC) return;
 
