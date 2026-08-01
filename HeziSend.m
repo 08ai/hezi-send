@@ -1,4 +1,4 @@
-// HeziSend.m — 赫兹群发+在线匹配
+// HeziSend.m
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -15,12 +15,8 @@ static UISwitch *_matchSwitch; static UILabel *_matchLabel;
 static NSInteger _totalUsers,_sentCount;
 static NSString *_deviceNum;
 
-static UIWindow* keyWin(void) {
-    for(UIScene *s in [UIApplication sharedApplication].connectedScenes){ if([s isKindOfClass:[UIWindowScene class]]) for(UIWindow *w in ((UIWindowScene*)s).windows) if(w.isKeyWindow) return w; }
-    for(UIWindow *w in [UIApplication sharedApplication].windows) if(w.isKeyWindow) return w;
-    return [UIApplication sharedApplication].windows.firstObject;
-}
-static NSString* loadDeviceNum(void) { NSString *s=[NSString stringWithContentsOfFile:@"/var/jb/shebeihao.txt" encoding:NSUTF8StringEncoding error:nil]; if(s){ s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; return s; } return @""; }
+static UIWindow* keyWin(void) { for(UIScene *s in [UIApplication sharedApplication].connectedScenes){ if([s isKindOfClass:[UIWindowScene class]]) for(UIWindow *w in ((UIWindowScene*)s).windows) if(w.isKeyWindow) return w; } for(UIWindow *w in [UIApplication sharedApplication].windows) if(w.isKeyWindow) return w; return [UIApplication sharedApplication].windows.firstObject; }
+static NSString* loadDeviceNum(void) { NSString *s=[NSString stringWithContentsOfFile:@"/var/jb/shebeihao.txt" encoding:NSUTF8StringEncoding error:nil]; if(s) return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; return @""; }
 static NSString* labelText(NSString *st) { return [NSString stringWithFormat:@"%@%@",_deviceNum?:@"",st]; }
 static void setBtnText(NSString *s) { dispatch_async(dispatch_get_main_queue(),^{ _btnLabel.text=labelText(s); }); }
 static UILabel *_toast;
@@ -33,52 +29,30 @@ static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDCha
 static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
-// ====== 匹配：用 HZRandomMatchViewController 触发 App 自己的匹配 ======
 static void doMatch(void) {
-    Class hzr = objc_getClass("HZHTTPRequest");
-    if(!hzr) return;
-    id req = ((id(*)(Class,SEL))objc_msgSend)([hzr class], @selector(alloc));
-    req = ((id(*)(id,SEL))objc_msgSend)(req, @selector(init));
-    if(!req) return;
-
-    // 获取 _configuration ivar
-    Ivar configIvar = class_getInstanceVariable(hzr, "_configuration");
-    id config = nil;
-    if(configIvar) config = object_getIvar(req, configIvar);
-    LOG(@"Match: config=%@", config?:@"nil");
-
-    // 在 config 上设 URL
-    NSString *urlStr = @"https://vchat-api.mokatech.cn/like/find/match?fr=48051782";
-    if(config){
-        @try{[config setValue:urlStr forKey:@"URLString"];}@catch(NSException *e){}
-        @try{[config setValue:@"POST" forKey:@"HTTPMethod"];}@catch(NSException *e){}
-        @try{[config setValue:@{@"fr":@"48051782"} forKey:@"parameters"];}@catch(NSException *e){}
-        // 设置成功/失败回调
-        @try{[config setValue:^(id resp){ LOG(@"Match HZHTTP success: %@", resp); } forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
-        @try{[config setValue:^(NSError *e){ LOG(@"Match HZHTTP fail: %@", e); } forKey:@"requestFailureBlock"];}@catch(NSException *e){}
-        LOG(@"Match: config done, URLString=%@", [config valueForKey:@"URLString"]);
+    Class pic = objc_getClass("PhotonIMClient");
+    Class pimsg = objc_getClass("PhotonIMMessage");
+    if(!pic||!pimsg) return;
+    id client = ((id(*)(Class,SEL))objc_msgSend)(pic, sel_registerName("sharedClient"));
+    if(!client) return;
+    // 尝试用 Photon 发匹配请求：messageType=100, chatType=2, toId=自己
+    NSString *myId = @"48051782";
+    id msg = ((id(*)(Class,SEL,id,id,NSInteger,NSInteger))objc_msgSend)(pimsg, sel_registerName("commonMessageWithFrid:toid:messageType:chatType:"), myId, myId, 100, 2);
+    if(msg){
+        SEL ss = sel_registerName("sendMessage:completion:");
+        if([client respondsToSelector:ss]){
+            ((void(*)(id,SEL,id,id))objc_msgSend)(client, ss, msg, nil);
+            LOG(@"Match: Photon msg sent type=100");
+        }
     }
-
-    @try{
-        ((void(*)(id,SEL))objc_msgSend)(req, @selector(start));
-        LOG(@"Match: HZHTTP started");
-    }@catch(NSException *e){ LOG(@"start crashed: %@", e); }
     _lastMatch = [[NSDate date] timeIntervalSince1970];
 }
 
-static void sendHiIfMatched(void) {
-    if(!_matching)return;
-    LOG(@"sendHi check");
-    Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return;
-    UIWindow *kw=keyWin(); if(!kw)return;
-    id cur=kw.rootViewController, chatVC=nil;
-    for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; }
-    if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"SENT hi!"); _matching=NO; _progSwitch=YES; dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } }
-}
+static void sendHiIfMatched(void) { if(!_matching)return; Class cc=objc_getClass("MDChatSingleViewController"); if(!cc)return; UIWindow *kw=keyWin(); if(!kw)return; id cur=kw.rootViewController, chatVC=nil; for(int i=0;i<20&&cur&&!chatVC;i++){ if([cur isKindOfClass:cc]){chatVC=cur;break;} id pres=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(pres){cur=pres;continue;} NSArray *vcs=((id(*)(id,SEL))objc_msgSend)(cur,sel_registerName("viewControllers")); if(vcs.count>0){cur=vcs.lastObject;continue;} break; } if(chatVC){ SEL ss=sel_registerName("sendMessageText:extInfo:"); if([chatVC respondsToSelector:ss]){((void(*)(id,SEL,id,id))objc_msgSend)(chatVC,ss,@"嗨",nil); LOG(@"SENT hi!"); _matching=NO; _progSwitch=YES; dispatch_async(dispatch_get_main_queue(),^{[_matchSwitch setOn:NO animated:YES];_progSwitch=NO;}); } } }
 
-static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ int tick=0; while(1){ sleep(2); if(!_matching){tick=0;continue;} tick++; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); if(tick%8==0&&[[NSDate date] timeIntervalSince1970]-_lastMatch>=15){ dispatch_async(dispatch_get_main_queue(),^{doMatch();}); } } }); }
+static void startAutoMatch(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(1){ sleep(2); if(!_matching)continue; dispatch_async(dispatch_get_main_queue(),^{sendHiIfMatched();}); } }); }
 
-static void onMatchToggle(id self, SEL _cmd) { if(_progSwitch)return; _matching=!_matching; dispatch_async(dispatch_get_main_queue(),^{ if(_matching){toast(@"自动匹配已开启");doMatch();}else{toast(@"自动匹配已关闭");} }); }
+static void onMatchToggle(id self, SEL _cmd) { if(_progSwitch)return; _matching=!_matching; dispatch_async(dispatch_get_main_queue(),^{ if(_matching){toast(@"检测中");}else{toast(@"已关闭");} }); }
 
 static void makeButton(void) { dispatch_async(dispatch_get_main_queue(),^{ UIWindow *kw=keyWin(); if(!kw){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1*NSEC_PER_SEC),dispatch_get_main_queue(),^{makeButton();});return;} CGFloat sw=[UIScreen mainScreen].bounds.size.width,sh=[UIScreen mainScreen].bounds.size.height,bs=60,bx=sw-bs-14,by=sh*0.35;
 _btn=[UIButton buttonWithType:UIButtonTypeCustom]; _btn.frame=CGRectMake(bx,by,bs,bs); _btn.backgroundColor=[[UIColor colorWithRed:0 green:0.7 blue:0.3 alpha:1] colorWithAlphaComponent:0.92]; _btn.layer.cornerRadius=bs/2; _btn.clipsToBounds=YES; _btn.layer.borderWidth=2; _btn.layer.borderColor=[UIColor whiteColor].CGColor;
