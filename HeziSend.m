@@ -32,96 +32,25 @@ static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDCha
 static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
-// ====== 匹配逻辑：用 HZHTTPRequest 发请求，App 自己签名 ======
-static NSString* getMyFr(void) {
-    NSString *dp=findDBPath(); if(!dp)return @"48051782";
-    sqlite3 *db=NULL; sqlite3_stmt *st=NULL; NSString *fr=nil;
-    if(sqlite3_open([dp UTF8String],&db)==SQLITE_OK){
-        if(sqlite3_prepare_v2(db,"SELECT value FROM md_config WHERE key='user_id'",-1,&st,NULL)==SQLITE_OK){ if(sqlite3_step(st)==SQLITE_ROW){ const char *c=(const char*)sqlite3_column_text(st,0); if(c) fr=[NSString stringWithUTF8String:c]; } sqlite3_finalize(st); }
-        sqlite3_close(db);
-    }
-    return fr?:@"48051782";
-}
-
-// NSURLSession hook 的原始 IMP
-static IMP _origDataTaskIMP = NULL;
-
-static NSURLSessionDataTask* hookedDataTask(id self, SEL _cmd, NSURLRequest *req, id handler) {
-    NSURL *u = req.URL;
-    NSString *url = u.absoluteString;
-    NSDictionary *hdrs = req.allHTTPHeaderFields;
-    NSData *body = req.HTTPBody;
-    NSString *bodyStr = body ? [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding] : nil;
-    // 只记录匹配相关请求
-    if([url containsString:@"like/find/match"] || [url containsString:@"mokatech"]){
-        LOG(@"MATCH-REQ: %@ %@ headers=%@ body=%.200s...", req.HTTPMethod, url, hdrs, bodyStr.UTF8String?:"");
-
-        // 保存最新 mzip 到文件，供下次使用
-        if(bodyStr && [bodyStr containsString:@"mzip="]){
-            NSString *mz = [bodyStr substringFromIndex:5]; // after "mzip="
-            NSString *cachePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"mzip_cache.txt"];
-            [mz writeToFile:cachePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        }
-    }
-
-    // 调用原始实现
-    if(_origDataTaskIMP){
-        return ((id(*)(id,SEL,id,id))_origDataTaskIMP)(self, _cmd, req, handler);
-    }
-    return nil;
-}
-
-static void installNSURLHook(void) {
-    // 1. Hook NSURLSession
-    Class nsu = objc_getClass("NSURLSession");
-    if(nsu){
-        Method m = class_getInstanceMethod(nsu, sel_registerName("dataTaskWithRequest:completionHandler:"));
-        if(m){ _origDataTaskIMP = method_getImplementation(m); method_setImplementation(m, (IMP)hookedDataTask); LOG(@"NSURL hook OK"); }
-    }
-    // 2. 只保留 NSURLSession hook（已验证稳定），去掉 NSURLConnection hook（可能崩溃）
-}
-
+// ====== 匹配：用 HZRandomMatchViewController 触发 App 自己的匹配 ======
 static void doMatch(void) {
-    NSString *fr = getMyFr();
-    NSString *urlStr = [NSString stringWithFormat:@"https://vchat-api.mokatech.cn/like/find/match?fr=%@", fr];
-
-    // 读取之前缓存的 mzip
-    NSString *cachePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"mzip_cache.txt"];
-    NSString *mzip = [NSString stringWithContentsOfFile:cachePath encoding:NSUTF8StringEncoding error:nil];
-    if(!mzip) mzip = @"";
-
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
-    [req setHTTPMethod:@"POST"];
-    [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"content-type"];
-    [req setValue:@"Vchat/4.9.3 ios/2130" forHTTPHeaderField:@"user-agent"];
-    [req setValue:@"*/*" forHTTPHeaderField:@"accept"];
-    [req setValue:@"zh-Hans-CN;q=1" forHTTPHeaderField:@"accept-language"];
-    [req setValue:@"1" forHTTPHeaderField:@"x-lv"];
-    [req setValue:@"66e6ccf7" forHTTPHeaderField:@"x-kv"];
-    [req setValue:@"SESSIONID=599E3BBE-B9D9-4FB7-1C25-D9FA7E49CD8E" forHTTPHeaderField:@"cookie"];
-    [req setValue:@"WY4GlakliXJzFdVMv+CyBeCkU78=" forHTTPHeaderField:@"x-sign"];
-    // 用 mzip 或最新抓到的
-    if(!mzip || mzip.length<100) mzip = @"AgO9yRIYAICUsMDoGPx6s3tC/ApIBBSzcH/K9tt148QnVfyG5FIWFcF7Xns+UA+uYlKfkq+Pu3Nr8Ym1agmlCnn41iBZkOMoggTA0uRPp6ptfLjkffhzRdJVNWJt7SlSU5gQa4YHT1RjOkiQINatfSFc3H/itwJ4pdk2ZbCwHwvjVb/dRR/eqQvYaaG4/cbS2zL7wJOAltdU0KL7+FYbItd62lGhoujPG1Jw3+y7ETjVgWLf02sUYITnjW6Li/J/yFuL8jC/gSojajFf2napeYEBka+cFYxiqGfVUNTHpLWNV3gEygdoFIZZel3gENUx5vc9lbjvLqLSUYP2m9RS7o5aoL44h0wOCLr/QLuIqUUa8vOAJX6E68tb42VJVTPxuA9ktRhvAl4hOS+lIcH2+/9RglxcVT+DCZal0i5mx/ljmVQr+Q75wQKKr6pcMKh0CLjXydqEV4BoeKPVbmBAIWT4m01Nhg0ZEB9/6eqSPccHu1H4bpzOH581ZwJwU8C/qETUDt1mK3R95n7H/RsS635odMIf/4rP7MFg2Xk/nMt00PZug0fLrbVKK1CTEe7tkIkkcKieYCo+uZSneh00aSz1CWkRhdgMbXHqJht8PU6C8w6M7zRt081kKwU4O9OuCSdV+gzIYuryYFiHDX6rlx8p4GiX4Rk5KJyXCF5z6cbmCLvCmMDofw0EzhPKxy8IRYibh/PliJ2hNK2RO7mZl6Lfw5eSEdDLvsmTOMdQMgKOZ5FciLzU+AfR/J5pTA5Dci4/ukRONfT3qIFZU4T5OclJ8wz5g3YrlH7i3ijJ6ENnMi8BIA++LTgcmhbkxP/pJMt4FoQ0J7VOGZRNHxyRJQYGoKE6jneJAv3x2uIgfTQxBo62lO7N6XeLxxtsjdFlnGRkUDK263Wj+wM8ZCwGLS5fZ9oowXF6AN3EoOu9pZE7UYE2dGgJCV1kV31esWCHOPhJ0ow+vGpqXsq7weSCg0C5fgWuf1Cu8XtsHmSIB/ByCelUjWzfaR5CJ223+be0LJhIHuEfOxui5iSi/w9J20xSvXjXf3GifsICfIxRg7ycZdJ8edewgXGfB8SK4A4D+bHhU8oVmG4QuZK0wDfkiVX2nhsX2dygrLkbhKt96YwIgd3DpPDwJ0DFjBBRTmHwMip4He8O6IrCT3/jMbrceqyqrkwEY/JbcIRj0FyZoahVnCD2A6FpuX+6pHRv8A/8GJh+KwZR8yNsfrKnGAiMWyE/bqeEoKZ51sr45JkHcy8MbAyUqyK6CWCPJLvk/+EBofwNN3MnuTjy6zYKUh7qiw5HfkL7q4nwJ/2e9hahoS2aiSP1zSIidcf+x3dbMF7yxVfNKWQJEwx0fhXvDMwkMGbaVamYO/CfXdn/WefgnWu8c2BKY8wN9ZPvES6HLHbCsOK7HSuogujtcXNBqpEM/c0+nP1sSq08EN1iwzri2LuPfZ7j1VRXsYoQ2Bd1w0eGo3AGTCXo7jPjgLnkQbw3ZVeHGGGcIFD3dkzrIub88GAzTroQ+0djw2HTFv8ypgvzgxEBu3uBYqwLv26KDrU8vvhHATw71C/77PXfV2EbipHrFZV9C3Vq5fvuZoU9dXyTg7qIaW2P97mPjfHko8PyqhCiCpGCmZQi0pKiS1ZVJtoqnpr3Dm1rKswha+7RF97w8ybGHBtIOzxJHGOCxDDh1i3LaMbmtTjUfiJRKUofxrZpuyqXRHx5cNYEdMVXymcxm/AO0a021PkXVTRR7qXqvM7zyxo7uRmWi42r12r+pwAbjiERaVM/Gq2jaoV+FHO1jOcWhlq20NdtpnXN9Ik3MA3iihNNocJkGaxcgQARY17MztOvUIpKhDMEZ3ut2kqTtWtCV1mLkwv+nqwZ5W8H3tGa6Cp0yfs=";
-    // URL-encode mzip (base64 里的 +/= 需转义)
-    NSMutableCharacterSet *allowed = [[NSCharacterSet alphanumericCharacterSet] mutableCopy];
-    // base64 不加额外字符，让 + / = 全部被编码
-    NSString *encodedMzip = [mzip stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-    if(!encodedMzip) encodedMzip = mzip;
-    [req setHTTPBody:[[NSString stringWithFormat:@"mzip=%@", encodedMzip] dataUsingEncoding:NSUTF8StringEncoding]];
-
-    dispatch_async(dispatch_get_global_queue(0,0), ^{
-        [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e){
-            NSInteger code = ((NSHTTPURLResponse*)r).statusCode;
-            NSString *body = d?[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]:@"";
-            LOG(@"Match: HTTP %ld %.100s",(long)code, body.UTF8String?:"");
-
-            // 如果成功，读取响应中的 mzip 缓存（服务端返回的可能更新鲜）
-            if(code==200 && body && [body containsString:@"\"ec\":200"]){
-                LOG(@"Match: SUCCESS!");
-            }
-        }] resume];
+    Class mc = objc_getClass("HZRandomMatchViewController");
+    if(!mc) return;
+    id vc = ((id(*)(Class,SEL))objc_msgSend)([mc class], @selector(alloc));
+    vc = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(init));
+    if(!vc) return;
+    UIWindow *kw = keyWin(); if(!kw) return;
+    id cur = kw.rootViewController;
+    while(1){id p=((id(*)(id,SEL))objc_msgSend)(cur,@selector(presentedViewController)); if(p){cur=p;continue;} break;}
+    ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(cur, @selector(presentViewController:animated:completion:), vc, NO, nil);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        id model = ((id(*)(id,SEL))objc_msgSend)(vc, @selector(model));
+        SEL bs = NSSelectorFromString(@"buttonActionWithModel:");
+        if([vc respondsToSelector:bs]){ ((void(*)(id,SEL,id))objc_msgSend)(vc, bs, model); LOG(@"Match: triggered"); }
+        SEL rs = NSSelectorFromString(@"requestData");
+        if([vc respondsToSelector:rs]){ ((void(*)(id,SEL))objc_msgSend)(vc, rs); LOG(@"Match: requestData"); }
     });
-    _lastMatch=[[NSDate date] timeIntervalSince1970];
+    _lastMatch = [[NSDate date] timeIntervalSince1970];
 }
 
 static void sendHiIfMatched(void) {
@@ -146,4 +75,4 @@ _matchSwitch=[[UISwitch alloc] initWithFrame:CGRectMake((pW-51)/2,20,51,31)]; _m
 static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0);class_addMethod(h,sel_registerName("onMatchToggle:"),(IMP)onMatchToggle,"v@:@");objc_registerClassPair(h);t=[[h alloc] init];} [_matchSwitch addTarget:t action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
 [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
-__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); installNSURLHook(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"ready"); }); }
+__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"ready"); }); }
