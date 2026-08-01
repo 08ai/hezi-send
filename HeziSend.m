@@ -548,20 +548,9 @@ static void onMatchToggle(id self, SEL _cmd) {
 
 // ==================== Navigation Hook：截获匹配页 VC ====================
 static id _capturedMatchVC = nil;
-
-static void navPushHook(id self, SEL _cmd, id vc, BOOL animated) {
-    Class matchCls = objc_getClass("HZRandomMatchViewController");
-    if (matchCls && [vc isKindOfClass:matchCls]) {
-        _capturedMatchVC = vc;
-        LOG(@"Match: captured real VC from nav push!");
-    }
-    // 调用原始实现
-    if (_origPushIMP) {
-        ((void(*)(id,SEL,id,BOOL))_origPushIMP)(self, _cmd, vc, animated);
-    }
-}
-
 static IMP _origPushIMP = NULL;
+static IMP _origPresentIMP = NULL;
+
 static void captureMatchVC(id vc) {
     Class matchCls = objc_getClass("HZRandomMatchViewController");
     if (matchCls && vc && [vc isKindOfClass:matchCls]) {
@@ -569,9 +558,6 @@ static void captureMatchVC(id vc) {
         LOG(@"Match: captured real VC!");
     }
 }
-
-static IMP _origPushIMP = NULL;
-static IMP _origPresentIMP = NULL;
 
 // Hook UINavigationController pushViewController:
 static void navPushHook(id self, SEL _cmd, id vc, BOOL animated) {
