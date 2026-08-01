@@ -85,7 +85,7 @@ static void hookedSendEvent(id self, SEL _cmd, id event) {
     if(touch){
         NSInteger phase = ((NSInteger(*)(id,SEL))objc_msgSend)(touch, @selector(phase));
         if(phase == 0){ // UITouchPhaseBegan
-            CGPoint pt = ((CGPoint(*)(id,SEL))objc_msgSend_stret)(touch, @selector(locationInView:), self);
+            CGPoint pt; ((void(*)(id,SEL,CGPoint*,id))objc_msgSend)(touch, @selector(locationInView:), &pt, self);
             LOG(@"TAP at (%.0f, %.0f)", pt.x, pt.y);
         }
     }
