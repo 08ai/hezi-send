@@ -407,42 +407,51 @@ static void doMatch(void) {
         Class matchCls = objc_getClass("HZRandomMatchViewController");
         if (!matchCls) { LOG(@"Match class not found"); return; }
 
-        // 搜所有窗口找匹配页 VC
-        id matchVC = nil;
-        LOG(@"Match: searching windows...");
-        UIWindow *kw = keyWin();
-        if (kw) {
-            LOG(@"Match: keyWin OK, rootVC=%@", kw.rootViewController);
-            matchVC = findMatchVC(matchCls, kw.rootViewController, 0);
-        }
-        LOG(@"Match: keyWin result=%@", matchVC ? @"FOUND" : @"nil");
+        // 找或创建匹配页 VC
+        id matchVC = findMatchVC(matchCls, keyWin().rootViewController, 0);
         if (!matchVC) {
-            NSArray *wins = [UIApplication sharedApplication].windows;
-            LOG(@"Match: scanning %lu windows", (unsigned long)wins.count);
-            for (UIWindow *w in wins) {
-                matchVC = findMatchVC(matchCls, w.rootViewController, 0);
-                if (matchVC) { LOG(@"Match: FOUND in window"); break; }
+            // Flutter VC 不在 UIKit 层级，主动创建并 push
+            matchVC = ((id(*)(Class,SEL))objc_msgSend)([matchCls class], sel_registerName("alloc"));
+            matchVC = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("init"));
+            if (!matchVC) { LOG(@"Match: init failed"); return; }
+            // 找到当前顶层 VC 的 navigationController
+            UIWindow *kw = keyWin();
+            id topVC = kw.rootViewController;
+            while (1) {
+                id pres = ((id(*)(id,SEL))objc_msgSend)(topVC, sel_registerName("presentedViewController"));
+                if (pres) { topVC = pres; continue; }
+                break;
+            }
+            SEL ncSel = sel_registerName("navigationController");
+            id nav = nil;
+            if ([topVC respondsToSelector:ncSel]) nav = ((id(*)(id,SEL))objc_msgSend)(topVC, ncSel);
+            if (nav) {
+                ((void(*)(id,SEL,id,BOOL))objc_msgSend)(nav, sel_registerName("pushViewController:animated:"), matchVC, NO);
+                LOG(@"Match: pushed new VC");
+            } else {
+                ((void(*)(id,SEL,id,BOOL,id))objc_msgSend)(topVC, sel_registerName("presentViewController:animated:completion:"), matchVC, NO, nil);
+                LOG(@"Match: presented new VC");
             }
         }
-        if (!matchVC) { LOG(@"Match: NOT FOUND in any window"); return; }
 
-        // 获取 model
-        id model = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("model"));
-        if (model) {
-            // 调用 buttonActionWithModel:
-            SEL btnSel = sel_registerName("buttonActionWithModel:");
-            if ([matchVC respondsToSelector:btnSel]) {
-                ((void(*)(id,SEL,id))objc_msgSend)(matchVC, btnSel, model);
-                LOG(@"Match: buttonActionWithModel called");
+        // 延迟执行匹配动作（等页面加载完）
+        id vcRef = matchVC;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            id model = ((id(*)(id,SEL))objc_msgSend)(vcRef, sel_registerName("model"));
+            if (model) {
+                SEL btnSel = sel_registerName("buttonActionWithModel:");
+                if ([vcRef respondsToSelector:btnSel]) {
+                    ((void(*)(id,SEL,id))objc_msgSend)(vcRef, btnSel, model);
+                    LOG(@"Match: buttonActionWithModel called");
+                }
+            } else {
+                SEL reqSel = sel_registerName("requestData");
+                if ([vcRef respondsToSelector:reqSel]) {
+                    ((void(*)(id,SEL))objc_msgSend)(vcRef, reqSel);
+                    LOG(@"Match: requestData called");
+                }
             }
-        } else {
-            // 没有 model，尝试直接调用 requestData
-            SEL reqSel = sel_registerName("requestData");
-            if ([matchVC respondsToSelector:reqSel]) {
-                ((void(*)(id,SEL))objc_msgSend)(matchVC, reqSel);
-                LOG(@"Match: requestData called");
-            }
-        }
+        });
         _lastMatch = [[NSDate date] timeIntervalSince1970];
 
         // 匹配后持续检测聊天页，一旦出现就发"嗨"
