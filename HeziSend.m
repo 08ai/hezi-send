@@ -399,8 +399,7 @@ static void doMatch(void) {
         if (!kw) { LOG(@"No keyWindow"); return; }
 
         id matchVC = findMatchVC(matchCls, kw.rootViewController);
-        LOG(@"Match VC search: %@", matchVC ? @"FOUND" : @"NOT FOUND");
-        if (!matchVC) { toast(@"请先进匹配页"); return; }
+        if (!matchVC) { return; }  // 不在匹配页，跳过（用户手动进入后会自动触发）
 
         // 获取 model
         id model = ((id(*)(id,SEL))objc_msgSend)(matchVC, sel_registerName("model"));
