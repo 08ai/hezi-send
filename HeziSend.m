@@ -30,31 +30,35 @@ static void sendMsg(NSString *uid,NSString *text) { Class c=objc_getClass("MDCha
 static void sendAll(NSString *text) { if(_sending||!text||text.length==0||[text isEqualToString:@"1"])return; _sending=YES; NSArray *segs=[text componentsSeparatedByString:@"###"]; NSMutableArray *ms=[NSMutableArray array]; for(NSString *s in segs){ NSString *t=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(t.length>0)[ms addObject:t]; } if(!ms.count){_sending=NO;return;} NSArray *uids=loadUserIDs(); _totalUsers=uids.count; _sentCount=0; if(!_totalUsers){_sending=NO;toast(@"无用户");setBtnText(@"轮询\n中");return;} NSInteger tm=ms.count; setBtnText([NSString stringWithFormat:@"0/%ld",(long)_totalUsers]); toast([NSString stringWithFormat:@"群发 %ld人x%ld条",(long)_totalUsers,(long)tm]); dispatch_async(dispatch_get_global_queue(0,0),^{ for(NSInteger i=0;i<uids.count;i++){ for(NSInteger j=0;j<tm;j++){ dispatch_sync(dispatch_get_main_queue(),^{sendMsg(uids[i],ms[j]);}); if(j<tm-1)usleep(200000); } _sentCount=i+1; dispatch_async(dispatch_get_main_queue(),^{setBtnText([NSString stringWithFormat:@"%ld/%ld",(long)_sentCount,(long)_totalUsers]);}); usleep(600000); } dispatch_sync(dispatch_get_main_queue(),^{_lastSend=[[NSDate date] timeIntervalSince1970]; _sending=NO; setBtnText(@"轮询\n中"); toast([NSString stringWithFormat:@"群发完成 %ld/%ld",(long)_sentCount,(long)_totalUsers]); }); }); }
 static void startPolling(void) { dispatch_async(dispatch_get_global_queue(0,0),^{ while(_polling){ sleep(3); @try{ NSString *u=[NSString stringWithFormat:@"http://39.102.210.175:5523/a1.php?shebeihao=%@",_deviceNum?:@""]; NSData *d=[NSData dataWithContentsOfURL:[NSURL URLWithString:u]]; if(!d)continue; NSString *s=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]; if(!s)continue; s=[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]; if(_sending||[s isEqualToString:@"1"])continue; if([[NSDate date] timeIntervalSince1970]-_lastSend<10)continue; dispatch_async(dispatch_get_main_queue(),^{sendAll(s);}); }@catch(NSException *e){} } }); }
 
+static void sendHZHTTP(NSString *url){
+    Class hzr=objc_getClass("HZHTTPRequest");if(!hzr)return;
+    id req=((id(*)(Class,SEL))objc_msgSend)([hzr class],@selector(alloc));
+    req=((id(*)(id,SEL))objc_msgSend)(req,@selector(init));
+    if(!req)return;
+    Ivar iv=class_getInstanceVariable(hzr,"_configuration");
+    id cfg=nil;if(iv)cfg=object_getIvar(req,iv);
+    if(cfg){
+        @try{[cfg setValue:url forKey:@"URLString"];}@catch(NSException *e){}
+        @try{[cfg setValue:@"POST" forKey:@"HTTPMethod"];}@catch(NSException *e){}
+        @try{[cfg setValue:@{@"fr":@"48051782"} forKey:@"parameters"];}@catch(NSException *e){}
+        @try{[cfg setValue:^(id r){LOG(@"HZHTTP ok:%@",r);} forKey:@"requestSuccessBlock"];}@catch(NSException *e){}
+        @try{[cfg setValue:^(NSError *e){LOG(@"HZHTTP err:%@",e);} forKey:@"requestFailureBlock"];}@catch(NSException *e){}
+    }
+    if([req respondsToSelector:@selector(start)]){((void(*)(id,SEL))objc_msgSend)(req,@selector(start));LOG(@"HZHTTP sent:%@",url);}
+}
+
 static void doMatch(void) {
-    // IOHIDEvent 触摸注入 - 快速点击匹配按钮
-    static void *(*IOHIDEventCreate)(void*,uint64_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,float,float,float,float,float,uint32_t,uint32_t,uint32_t)=NULL;
-    static void *(*IOServiceGetMatchingService)(void*,void*)=NULL;
-    static void*(*IOHIDEventSystemClientCreate)(void*)=NULL;
-    static void(*IOHIDEventSystemClientDispatchEvent)(void*,void*)=NULL;
-    static BOOL init=NO;
-    if(!init){init=YES;
-        void *io=dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",RTLD_NOW);
-        if(io){IOHIDEventCreate=dlsym(io,"IOHIDEventCreateDigitizerEvent");IOHIDEventSystemClientCreate=dlsym(io,"IOHIDEventSystemClientCreate");IOHIDEventSystemClientDispatchEvent=dlsym(io,"IOHIDEventSystemClientDispatchEvent");}
-        LOG(@"IOKit: create=%p client=%p dispatch=%p",IOHIDEventCreate,IOHIDEventSystemClientCreate,IOHIDEventSystemClientDispatchEvent);
-    }
-    if(!IOHIDEventCreate||!IOHIDEventSystemClientDispatchEvent)return;
-    float sw=[UIScreen mainScreen].bounds.size.width,sh=[UIScreen mainScreen].bounds.size.height;
-    void *cl=IOHIDEventSystemClientCreate(NULL);
-    float xs=sw*0.5f, ys[]={sh-100,sh-150,sh-200,sh-60,sh*0.78f,sh*0.72f,sh*0.65f};
-    for(int i=0;i<7;i++){
-        uint64_t ts=mach_absolute_time();
-        void *d=IOHIDEventCreate(NULL,ts,0,0,0,0,0,0,0,xs,ys[i],0,0,0,1,0,0);
-        void *u=IOHIDEventCreate(NULL,ts+1000000,0,0,0,0,0,0,0,xs,ys[i],0,0,0,0,0,0);
-        if(d){IOHIDEventSystemClientDispatchEvent(cl,d);CFRelease(d);}
-        if(u){IOHIDEventSystemClientDispatchEvent(cl,u);CFRelease(u);}
-        usleep(50000);
-    }
-    LOG(@"Match: tapped 7 positions");
+    NSString *fr=@"48051782",*base=@"https://vchat-api.mokatech.cn";
+    // 完整匹配流程：5步HTTP请求
+    NSArray *urls=@[
+        [NSString stringWithFormat:@"%@/like/find/check?fr=%@",base,fr],
+        [NSString stringWithFormat:@"%@/location/user/update?fr=%@",base,fr],
+        [NSString stringWithFormat:@"%@/like/find/match/card?fr=%@",base,fr],
+        [NSString stringWithFormat:@"%@/like/find/match?fr=%@",base,fr],
+        [NSString stringWithFormat:@"%@/im/message/interesttagcardv3?fr=%@",base,fr],
+    ];
+    for(NSString *u in urls){sendHZHTTP(u);usleep(200000);}
+    LOG(@"Match: 5 HZHTTP requests sent");
     _lastMatch=[[NSDate date] timeIntervalSince1970];
 }
 
