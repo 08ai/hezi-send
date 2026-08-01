@@ -198,19 +198,57 @@ _matchSwitch=[[UISwitch alloc] initWithFrame:CGRectMake((pW-51)/2,20,51,31)]; _m
 static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0);class_addMethod(h,sel_registerName("onMatchToggle:"),(IMP)onMatchToggle,"v@:@");objc_registerClassPair(h);t=[[h alloc] init];} [_matchSwitch addTarget:t action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
 [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
-// Hook FlutterMethodChannel 记录所有 Flutter→Native 调用
-static IMP _origFMCI = NULL;
-static void fmcHook(id self, SEL _cmd, NSString *method, id args, id result) {
-    LOG(@"FMC: %@", method);
-    if(_origFMCI) ((void(*)(id,SEL,id,id,id))_origFMCI)(self,_cmd,method,args,result);
+// Hook 所有 Flutter → Native 通信
+static void logFlutterCall(NSString *prefix, NSString *method) {
+    if(method.length>0) LOG(@"FMC[%@]: %@", prefix, method);
 }
-static void installFMCHook(void) {
+
+static void installFlutterHooks(void) {
+    // 1. FlutterMethodChannel invokeMethod:arguments:result:
     Class fmc = objc_getClass("FlutterMethodChannel");
-    if(!fmc)return;
-    Method m = class_getInstanceMethod(fmc, sel_registerName("invokeMethod:arguments:result:"));
-    if(m){
-        _origFMCI = method_setImplementation(m, (IMP)fmcHook);
-        LOG(@"FMC hook installed");
+    if(fmc){
+        Method m = class_getInstanceMethod(fmc, sel_registerName("invokeMethod:arguments:result:"));
+        if(m){
+            IMP orig = method_setImplementation(m, imp_implementationWithBlock(^(id self, NSString *m, id args, id result){
+                logFlutterCall(@"M", m);
+                IMP old = class_getMethodImplementation(fmc, sel_registerName("_hz_fmc_orig"));
+                if(old) ((void(*)(id,SEL,id,id,id))old)(self, sel_registerName("invokeMethod:arguments:result:"), m, args, result);
+            }));
+            class_addMethod(fmc, sel_registerName("_hz_fmc_orig"), orig, method_getTypeEncoding(m));
+            LOG(@"FMC hook OK");
+        }
+    }
+    // 2. FlutterBasicMessageChannel sendMessage:
+    Class fbmc = objc_getClass("FlutterBasicMessageChannel");
+    if(fbmc){
+        Method m2 = class_getInstanceMethod(fbmc, sel_registerName("sendMessage:"));
+        if(m2){
+            IMP orig2 = method_setImplementation(m2, imp_implementationWithBlock(^(id self, id msg){
+                logFlutterCall(@"B", [msg description]);
+                IMP old = class_getMethodImplementation(fbmc, sel_registerName("_hz_fbmc_orig"));
+                if(old) ((void(*)(id,SEL,id))old)(self, sel_registerName("sendMessage:"), msg);
+            }));
+            class_addMethod(fbmc, sel_registerName("_hz_fbmc_orig"), orig2, method_getTypeEncoding(m2));
+            LOG(@"FBMC hook OK");
+        }
+    }
+    // 3. Hook NSObject performSelector (catches button actions)
+    Class nso = objc_getClass("NSObject");
+    // 4. Hook UIControl sendAction:to:forEvent:
+    Class uic = objc_getClass("UIControl");
+    if(uic){
+        Method m3 = class_getInstanceMethod(uic, sel_registerName("sendAction:to:forEvent:"));
+        if(m3){
+            IMP orig3 = method_setImplementation(m3, imp_implementationWithBlock(^(id self, SEL action, id target, id event){
+                NSString *selName = NSStringFromSelector(action);
+                NSString *clsName = NSStringFromClass([target class]);
+                LOG(@"UICtrl: %@ %@", clsName, selName);
+                IMP old = class_getMethodImplementation(uic, sel_registerName("_hz_ctrl_orig"));
+                if(old) ((void(*)(id,SEL,SEL,id,id))old)(self, sel_registerName("sendAction:to:forEvent:"), action, target, event);
+            }));
+            class_addMethod(uic, sel_registerName("_hz_ctrl_orig"), orig3, method_getTypeEncoding(m3));
+            LOG(@"UICtrl hook OK");
+        }
     }
 }
-__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); installFMCHook(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
+__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); installFlutterHooks(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
