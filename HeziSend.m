@@ -181,13 +181,39 @@ static void doMatch(void) {
     }
     if(!fr) fr = @"48051782"; // fallback
 
-    // 2. 获取 SESSIONID cookie
+    // 2. 从 DB 或 UserDefaults 获取 SESSIONID
     NSString *sessionId = nil;
-    NSHTTPCookieStorage *cs = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for(NSHTTPCookie *ck in cs.cookies){
-        if([ck.name isEqualToString:@"SESSIONID"] && [ck.domain containsString:@"mokatech"]){
-            sessionId = ck.value; break;
+    // 尝试从 NSHTTPCookieStorage
+    for(NSHTTPCookie *ck in [NSHTTPCookieStorage sharedHTTPCookieStorage].cookies){
+        if([ck.name isEqualToString:@"SESSIONID"]){ sessionId = ck.value; break; }
+    }
+    // 尝试从 DB
+    if(!sessionId && dbPath){
+        sqlite3 *db2=NULL; sqlite3_stmt *st2=NULL;
+        if(sqlite3_open([dbPath UTF8String],&db2)==SQLITE_OK){
+            // 尝试各种可能的表/列
+            const char *queries[] = {
+                "SELECT value FROM md_config WHERE key='session_id'",
+                "SELECT s_value FROM md_session WHERE s_key='SESSIONID'",
+                "SELECT sessionId FROM md_user",
+                "SELECT s_sessionID FROM md_default_session LIMIT 1",
+            };
+            for(int qi=0;qi<4&&!sessionId;qi++){
+                if(sqlite3_prepare_v2(db2,queries[qi],-1,&st2,NULL)==SQLITE_OK){
+                    if(sqlite3_step(st2)==SQLITE_ROW){
+                        const char *c=(const char*)sqlite3_column_text(st2,0);
+                        if(c) sessionId=[NSString stringWithUTF8String:c];
+                    }
+                    sqlite3_finalize(st2); st2=NULL;
+                }
+            }
+            sqlite3_close(db2);
         }
+    }
+    // 尝试从 NSUserDefaults
+    if(!sessionId){
+        NSString *sid = [[NSUserDefaults standardUserDefaults] stringForKey:@"SESSIONID"];
+        if(sid) sessionId = sid;
     }
     if(!sessionId) { LOG(@"Match: no SESSIONID cookie"); return; }
 
