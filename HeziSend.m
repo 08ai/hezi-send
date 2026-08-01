@@ -272,14 +272,12 @@ static void doMatch(void) {
     @try {
         CGFloat sw = [UIScreen mainScreen].bounds.size.width;
         CGFloat sh = [UIScreen mainScreen].bounds.size.height;
-        // 尝试常见匹配按钮位置（屏幕中下方）
-        injectTap(sw * 0.50, sh * 0.72);
-        usleep(150000);
-        injectTap(sw * 0.50, sh * 0.68);
-        usleep(150000);
-        injectTap(sw * 0.50, sh * 0.65);
+        // 匹配按钮通常在底部：从下往上试
+        injectTap(sw * 0.50, sh - 80);   // 底部往上 80px
+        usleep(200000);
+        injectTap(sw * 0.50, sh - 140);  // 底部往上 140px
         _lastMatch = [[NSDate date] timeIntervalSince1970];
-        LOG(@"Match: injected taps at (%.0f%%,%.0f%%)-(%.0f%%,%.0f%%)", sw*0.50, sh*0.65, sw*0.50, sh*0.72);
+        LOG(@"Match: taps at bottom (y=%.0f, %.0f)", sh-80, sh-140);
     } @catch (NSException *e) { LOG(@"Match crash: %@", e); }
 }
 
