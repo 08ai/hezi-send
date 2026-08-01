@@ -76,7 +76,30 @@ static id findMatchInObj(id obj) {
     return nil;
 }
 
-// dump 所有 accessibility 元素（调试用，找到后删除）
+// Hook UIWindow sendEvent: 记录所有触摸坐标
+static IMP _origSendEvent = NULL;
+static void hookedSendEvent(id self, SEL _cmd, id event) {
+    // 只记录 touchesBegan
+    NSSet *touches = ((id(*)(id,SEL))objc_msgSend)(event, @selector(allTouches));
+    id touch = [touches anyObject];
+    if(touch){
+        NSInteger phase = ((NSInteger(*)(id,SEL))objc_msgSend)(touch, @selector(phase));
+        if(phase == 0){ // UITouchPhaseBegan
+            CGPoint pt = ((CGPoint(*)(id,SEL))objc_msgSend_stret)(touch, @selector(locationInView:), self);
+            LOG(@"TAP at (%.0f, %.0f)", pt.x, pt.y);
+        }
+    }
+    if(_origSendEvent) ((void(*)(id,SEL,id))_origSendEvent)(self, _cmd, event);
+}
+
+static void installTouchLogger(void) {
+    Class wc = objc_getClass("UIWindow");
+    if(!wc)return;
+    Method m = class_getInstanceMethod(wc, @selector(sendEvent:));
+    if(m) _origSendEvent = method_setImplementation(m, (IMP)hookedSendEvent);
+    LOG(@"Touch logger installed");
+}
+
 static void dumpA11y(id container, int depth) {
     if(!container||depth>15)return;
     if([container isAccessibilityElement]){
@@ -171,4 +194,4 @@ _matchSwitch=[[UISwitch alloc] initWithFrame:CGRectMake((pW-51)/2,20,51,31)]; _m
 static id t=nil; if(!t){Class h=objc_allocateClassPair([NSObject class],"HZMH",0);class_addMethod(h,sel_registerName("onMatchToggle:"),(IMP)onMatchToggle,"v@:@");objc_registerClassPair(h);t=[[h alloc] init];} [_matchSwitch addTarget:t action:sel_registerName("onMatchToggle:") forControlEvents:UIControlEventValueChanged];
 [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer*_){UIWindow *k2=keyWin();if(k2&&_btn.superview!=k2){[_btn removeFromSuperview];[k2 addSubview:_btn];} if(k2&&mp.superview!=k2){[mp removeFromSuperview];[k2 addSubview:mp];} if(k2){[k2 bringSubviewToFront:_btn];[k2 bringSubviewToFront:mp];}}]; }); }
 
-__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
+__attribute__((constructor)) static void HZInit(void) { LOG(@"HeziSend loaded"); _deviceNum=loadDeviceNum(); installTouchLogger(); dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{ makeButton(); startPolling(); startAutoMatch(); LOG(@"HeziSend ready"); toast(@"赫兹群发已就绪"); }); }
