@@ -214,8 +214,19 @@ static void doMatch(void) {
     if(!sessionId){
         NSString *sid = [[NSUserDefaults standardUserDefaults] stringForKey:@"SESSIONID"];
         if(sid) sessionId = sid;
+        // 尝试从 HTTPCookieStorage 读 mokatech.cn 域
+        if(!sid){
+            NSHTTPCookieStorage *store = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            for(NSHTTPCookie *c in store.cookies){
+                if([c.name isEqualToString:@"SESSIONID"]){
+                    sessionId = c.value;
+                    LOG(@"Match: cookie SESSIONID=%@ domain=%@", c.value, c.domain);
+                    break;
+                }
+            }
+        }
     }
-    if(!sessionId) { LOG(@"Match: no SESSIONID cookie"); return; }
+    LOG(@"Match: sessionId=%@ fr=%@", sessionId?:@"NOT FOUND", fr);
 
     // 3. 发送匹配请求（用抓包得到的真实数据）
     NSString *urlStr = [NSString stringWithFormat:@"https://vchat-api.mokatech.cn/like/find/match?fr=%@", fr];
